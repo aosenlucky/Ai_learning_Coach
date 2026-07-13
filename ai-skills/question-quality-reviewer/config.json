@@ -1,0 +1,7 @@
+{
+  "name": "question-quality-reviewer",
+  "prompt": "../../prompts/question-reviewer/prompt.md",
+  "input": "Question",
+  "output": "ReviewScore",
+  "testCommand": "npm run test:skills"
+}

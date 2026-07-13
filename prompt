@@ -1,0 +1,931 @@
+# Codex 开发 Prompt
+
+# 项目名称
+
+Personal AI Learning Coach
+
+个人AI学习教练平台
+
+---
+
+# 一、项目背景
+
+我已经有一个 Obsidian + Anki 知识管理系统。
+
+目前的问题：
+
+1. 阅读书籍、学习课程、参加会议后，通过划线、整理笔记仍然容易遗忘。
+2. 现有笔记更多解决“记录”，无法解决“理解、应用和输出”。
+3. 需要一个独立工具，通过主动提问、回答、批改、反馈强化学习效果。
+
+因此开发：
+
+> Personal AI Learning Coach
+
+作为独立Web应用。
+
+它不是普通Quiz系统，而是：
+
+一个基于个人知识输入的 AI主动学习、能力评估、知识强化平台。
+
+---
+
+# 二、产品定位
+
+用户：
+
+仅服务个人。
+
+不设计多用户体系。
+
+不需要复杂权限管理。
+
+核心闭环：
+
+```
+输入知识素材
+
+↓
+
+AI分析知识结构
+
+↓
+
+生成高价值问题
+
+↓
+
+用户回答
+
+↓
+
+AI评价理解程度
+
+↓
+
+发现知识漏洞
+
+↓
+
+生成强化建议
+
+↓
+
+记录成长轨迹
+```
+
+---
+
+# 三、技术架构要求
+
+参考已有 family_dashboard 项目的技术风格。
+
+## Frontend
+
+技术：
+
+* React
+* TypeScript
+* Vite
+* Tailwind CSS
+
+UI要求：
+
+参考：
+
+* Apple官网风格
+* 简洁
+* 高级感
+* 大留白
+* 卡片设计
+* 流畅动画
+
+部署：
+
+腾讯 EdgeOne Pages。
+
+---
+
+## Backend
+
+采用Serverless架构。
+
+负责：
+
+* AI调用
+* 数据处理
+* Prompt管理
+
+---
+
+## Database
+
+使用：
+
+Supabase PostgreSQL
+
+保存：
+
+* 学习素材
+* 知识分析
+* 题目
+* 用户回答
+* AI评价
+* 学习记录
+* 能力变化
+
+---
+
+## AI模型
+
+使用：
+
+DeepSeek API
+
+模型：
+
+DeepSeek v4-pro
+
+要求：
+
+所有Prompt独立管理。
+
+目录：
+
+```
+/prompts
+
+/question-generator
+
+/question-reviewer
+
+/answer-evaluator
+
+/learning-recommendation
+```
+
+---
+
+# 四、核心功能设计
+
+# Module 1：知识输入
+
+支持：
+
+MVP：
+
+* Markdown
+* TXT
+* 手动粘贴文本
+
+未来扩展：
+
+* Obsidian Vault同步
+* PDF
+* 网页
+
+输入：
+
+```
+标题
+
+来源类型
+
+主题
+
+正文
+
+标签
+
+学习目标
+```
+
+来源：
+
+* 书籍
+* 会议
+* 文章
+* 视频课程
+* 技术文档
+
+---
+
+# Module 2：Knowledge Analyzer Skill
+
+输入：
+
+原始素材。
+
+不要直接出题。
+
+首先分析：
+
+```
+核心概念
+
+关键知识点
+
+因果关系
+
+方法论
+
+案例
+
+应用场景
+
+争议观点
+```
+
+输出：
+
+JSON:
+
+```json
+{
+"topics":[],
+"concepts":[],
+"logic":[],
+"cases":[],
+"applications":[]
+}
+```
+
+作用：
+
+保证后续问题覆盖核心知识。
+
+---
+
+# Module 3：Skill Strategy Layer
+
+设计独立Skill架构。
+
+目录：
+
+```
+/ai-skills
+
+/question-generator
+
+/question-quality-reviewer
+
+/answer-evaluator
+
+/learning-recommendation
+
+/skill-router
+```
+
+每个Skill：
+
+必须：
+
+* 独立Prompt
+* 独立配置
+* JSON输入输出
+* 可单独测试
+
+---
+
+# Skill Router
+
+根据素材自动选择策略。
+
+规则：
+
+会议：
+
+使用：
+
+Business Application Mode
+
+书籍：
+
+使用：
+
+Deep Understanding Mode
+
+技术文档：
+
+使用：
+
+Technical Mastery Mode
+
+客户方案：
+
+使用：
+
+Executive Expression Mode
+
+---
+
+# Skill 1：Question Generator
+
+目标：
+
+生成高价值问题。
+
+禁止：
+
+简单知识背诵。
+
+不要大量生成：
+
+“什么是XXX？”
+
+除非用于基础检测。
+
+---
+
+采用：
+
+Bloom Taxonomy：
+
+```
+Remember
+
+Understand
+
+Apply
+
+Analyze
+
+Evaluate
+
+Create
+```
+
+优先级：
+
+```
+Application
+
+>
+
+Analysis
+
+>
+
+Evaluation
+
+>
+
+Understanding
+
+>
+
+Memory
+```
+
+---
+
+问题类型：
+
+## 1. 概念理解题
+
+20%
+
+检查知识边界。
+
+示例：
+
+为什么Agent不能简单理解为ChatGPT企业版？
+
+---
+
+## 2. 原理分析题
+
+20%
+
+检查因果。
+
+示例：
+
+为什么企业AI价值更多来自流程重构，而不是模型参数增加？
+
+---
+
+## 3. 对比分析题
+
+15%
+
+建立认知边界。
+
+示例：
+
+传统自动化和Agent自动化有什么区别？
+
+---
+
+## 4. 场景应用题
+
+30%
+
+最高优先级。
+
+自动结合：
+
+用户工作背景。
+
+例如：
+
+如果向制造企业CIO介绍Agent价值，你如何设计交流逻辑？
+
+---
+
+## 5. 批判思考题
+
+10%
+
+例如：
+
+企业全面采用Agent是否一定提高效率？
+
+---
+
+## 6. 表达输出题
+
+5%
+
+例如：
+
+请用3分钟向非技术领导解释这个概念。
+
+---
+
+# Question Quality Reviewer Skill
+
+每道题生成后进行质量审核。
+
+评分：
+
+100分制。
+
+指标：
+
+```
+核心知识覆盖 20
+
+思考深度 20
+
+应用价值 20
+
+避免死记 20
+
+评价标准清晰 20
+```
+
+低于80分：
+
+自动重新生成。
+
+---
+
+# Module 4：答题模式
+
+支持两个模式。
+
+## Mode A：考试模式（默认）
+
+流程：
+
+选择素材
+
+↓
+
+AI生成题目
+
+↓
+
+连续回答
+
+↓
+
+统一提交
+
+↓
+
+AI报告
+
+支持：
+
+题目数量：
+
+* 自动
+* 用户指定
+
+自动模式：
+
+根据：
+
+知识点数量
+
+复杂度
+
+学习目标
+
+决定题量。
+
+要求：
+
+必须覆盖核心知识。
+
+---
+
+## Mode B：AI陪练模式
+
+流程：
+
+AI：
+
+提出问题
+
+用户：
+
+回答
+
+AI：
+
+评价
+
+AI：
+
+追问
+
+继续深入。
+
+支持：
+
+最多3轮追问。
+
+---
+
+# Module 5：Answer Evaluator Skill
+
+目标：
+
+判断是否真正理解。
+
+不要关键词匹配。
+
+评价维度：
+
+```
+概念准确性 20
+
+逻辑完整性 20
+
+应用能力 25
+
+批判思考 20
+
+表达能力 15
+```
+
+输出：
+
+```json
+{
+score:85,
+
+ability:{
+concept:90,
+logic:80,
+application:75,
+expression:90
+},
+
+strengths:[],
+
+weaknesses:[],
+
+missing_points:[],
+
+follow_up_questions:[]
+}
+```
+
+---
+
+# Module 6：Learning Recommendation Skill
+
+根据：
+
+* 历史答题
+* 当前错误
+* 能力趋势
+
+生成：
+
+学习建议。
+
+输出：
+
+```
+当前掌握：
+
+知识漏洞：
+
+建议补充：
+
+实践任务：
+
+下一次复习重点：
+```
+
+---
+
+# Module 7：知识强化
+
+不要覆盖原笔记。
+
+生成：
+
+Learning Insight。
+
+例如：
+
+```
+主题：
+
+Agent
+
+
+我的薄弱点：
+
+缺少企业案例理解
+
+
+补充理解：
+
+xxx
+
+
+应用建议：
+
+xxx
+```
+
+未来支持：
+
+同步Obsidian。
+
+---
+
+# Module 8：学习记录系统
+
+完整保存所有过程。
+
+数据库设计：
+
+## learning_sources
+
+素材。
+
+字段：
+
+id
+
+title
+
+type
+
+content
+
+created_at
+
+---
+
+## knowledge_analysis
+
+AI分析结果。
+
+---
+
+## question_sets
+
+一次测试。
+
+字段：
+
+id
+
+source_id
+
+mode
+
+question_count
+
+created_at
+
+---
+
+## questions
+
+题目。
+
+字段：
+
+type
+
+difficulty
+
+knowledge_point
+
+question
+
+expected_answer
+
+---
+
+## answers
+
+用户答案。
+
+---
+
+## evaluations
+
+AI评价。
+
+---
+
+## learning_reports
+
+学习总结。
+
+保存：
+
+* 得分
+* 能力画像
+* 薄弱点
+* 建议
+
+---
+
+# Module 9：Dashboard
+
+首页：
+
+展示：
+
+## 最近学习
+
+例如：
+
+Agent学习
+
+评分82
+
+---
+
+## 能力趋势
+
+展示：
+
+* 理解能力
+* 分析能力
+* 应用能力
+* 表达能力
+
+---
+
+## 知识薄弱地图
+
+例如：
+
+AI：
+
+应用能力70%
+
+案例不足。
+
+---
+
+# 页面设计
+
+需要：
+
+## Dashboard
+
+## 素材管理
+
+## 测试生成
+
+## 答题页面
+
+## AI反馈页面
+
+## 历史记录页面
+
+## 能力分析页面
+
+---
+
+# 外部Skill参考
+
+开发时参考：
+
+1. find-skills
+
+用于发现更多Skill。
+
+2. curriculum-assessment-design
+
+用于学习目标和评价体系设计。
+
+3. capability-assessment
+
+用于能力评估。
+
+4. frontend-design
+
+用于UI设计。
+
+注意：
+
+不要直接依赖外部Skill运行。
+
+最终实现：
+
+自研Skill Strategy Layer。
+
+---
+
+# 项目结构要求
+
+生成：
+
+README.md
+
+包含：
+
+* 项目介绍
+* 架构
+* 本地运行
+* EdgeOne部署
+* Supabase配置
+* DeepSeek配置
+
+TODO.md
+
+包含：
+
+未来：
+
+* Obsidian同步
+* Anki同步
+* PDF解析
+* 语音回答
+* AI学习计划
+* 知识图谱
+
+---
+
+# MVP交付标准
+
+必须完成：
+
+✅ React Web应用
+
+✅ EdgeOne部署支持
+
+✅ Supabase数据库
+
+✅ DeepSeek API调用
+
+✅ Markdown/Text输入
+
+✅ 知识分析
+
+✅ 高价值问题生成
+
+✅ 题目质量审核
+
+✅ 考试模式
+
+✅ AI陪练模式
+
+✅ AI批改
+
+✅ 学习记录
+
+✅ Dashboard
+
+✅ README
+
+✅ TODO
+
+---
+
+开发完成后输出：
+
+1. 项目结构说明
+
+2. 数据库初始化SQL
+
+3. 环境变量说明
+
+4. 部署说明
+
+5. 后续优化建议

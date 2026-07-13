@@ -1,0 +1,7 @@
+{
+  "name": "learning-recommendation",
+  "prompt": "../../prompts/learning-recommendation/prompt.md",
+  "input": "KnowledgeAnalysis + Evaluation[]",
+  "output": "LearningRecommendation + LearningInsight",
+  "testCommand": "npm run test:skills"
+}

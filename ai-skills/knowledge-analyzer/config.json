@@ -1,0 +1,7 @@
+{
+  "name": "knowledge-analyzer",
+  "prompt": "../../prompts/knowledge-analyzer/prompt.md",
+  "input": "LearningSource",
+  "output": "KnowledgeAnalysis",
+  "testCommand": "npm run test:skills"
+}

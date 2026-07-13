@@ -1,0 +1,7 @@
+{
+  "name": "answer-evaluator",
+  "prompt": "../../prompts/answer-evaluator/prompt.md",
+  "input": "QuestionSet + UserAnswer[]",
+  "output": "Evaluation[]",
+  "testCommand": "npm run test:skills"
+}

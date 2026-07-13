@@ -1,0 +1,7 @@
+{
+  "name": "skill-router",
+  "prompt": "../../prompts/skill-router/prompt.md",
+  "input": "LearningSource.type",
+  "output": "StrategyMode",
+  "testCommand": "npm run test:skills"
+}

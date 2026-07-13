@@ -1,0 +1,7 @@
+{
+  "name": "question-generator",
+  "prompt": "../../prompts/question-generator/prompt.md",
+  "input": "KnowledgeAnalysis + LearningMode",
+  "output": "Question[]",
+  "testCommand": "npm run test:skills"
+}
