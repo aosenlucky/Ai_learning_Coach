@@ -26,6 +26,15 @@ const abilityKeys = ['concept', 'logic', 'application', 'critical', 'expression'
 
 type DbRow = Record<string, unknown>;
 
+export interface RemoteSyncResult {
+  sources: number;
+  analyses: number;
+  questionSets: number;
+  answers: number;
+  evaluations: number;
+  reports: number;
+}
+
 export const initialState: AppState = {
   sources: [sampleSource],
   analyses: [],
@@ -130,70 +139,129 @@ export function mergeAppState(local: AppState, remote: AppState): AppState {
   };
 }
 
+export async function syncStateToRemote(state: AppState): Promise<RemoteSyncResult> {
+  requireSupabaseClient();
+
+  for (const source of state.sources) {
+    await persistSource(source);
+  }
+
+  for (const analysis of state.analyses) {
+    await persistAnalysis(analysis);
+  }
+
+  for (const questionSet of state.questionSets) {
+    await persistQuestionSet(questionSet);
+  }
+
+  const questionSetIds = new Set([
+    ...state.questionSets.map((questionSet) => questionSet.id),
+    ...Object.keys(state.answers),
+    ...Object.keys(state.evaluations),
+  ]);
+
+  let answerCount = 0;
+  let evaluationCount = 0;
+  for (const questionSetId of questionSetIds) {
+    const answers = state.answers[questionSetId] ?? [];
+    const evaluations = state.evaluations[questionSetId] ?? [];
+    await replaceStudySession(questionSetId, answers, evaluations);
+    answerCount += answers.length;
+    evaluationCount += evaluations.length;
+  }
+
+  for (const report of state.reports) {
+    await persistReport(report);
+  }
+
+  return {
+    sources: state.sources.length,
+    analyses: state.analyses.length,
+    questionSets: state.questionSets.length,
+    answers: answerCount,
+    evaluations: evaluationCount,
+    reports: state.reports.length,
+  };
+}
+
 export async function persistSource(source: LearningSource): Promise<void> {
   if (!supabase) return;
 
-  await supabase.from('learning_sources').upsert({
-    id: source.id,
-    title: source.title,
-    type: source.type,
-    topic: source.topic,
-    content: source.content,
-    tags: source.tags,
-    learning_goal: source.goal,
-    created_at: source.createdAt,
-  });
+  await runSupabase(
+    supabase.from('learning_sources').upsert({
+      id: source.id,
+      title: source.title,
+      type: source.type,
+      topic: source.topic,
+      content: source.content,
+      tags: source.tags,
+      learning_goal: source.goal,
+      created_at: source.createdAt,
+    }),
+    '保存素材到 Supabase',
+  );
 }
 
 export async function persistAnalysis(analysis: KnowledgeAnalysis): Promise<void> {
   if (!supabase) return;
 
-  await supabase.from('knowledge_analysis').upsert({
-    id: analysis.id,
-    source_id: analysis.sourceId,
-    strategy: analysis.strategy,
-    topics: analysis.topics,
-    concepts: analysis.concepts,
-    logic: analysis.logic,
-    cases: analysis.cases,
-    applications: analysis.applications,
-    controversies: analysis.controversies,
-    created_at: analysis.createdAt,
-  });
+  await runSupabase(
+    supabase.from('knowledge_analysis').upsert({
+      id: analysis.id,
+      source_id: analysis.sourceId,
+      strategy: analysis.strategy,
+      topics: analysis.topics,
+      concepts: analysis.concepts,
+      logic: analysis.logic,
+      cases: analysis.cases,
+      applications: analysis.applications,
+      controversies: analysis.controversies,
+      created_at: analysis.createdAt,
+    }),
+    '保存知识分析到 Supabase',
+  );
 }
 
 export async function persistQuestionSet(questionSet: QuestionSet): Promise<void> {
   if (!supabase) return;
 
-  await supabase.from('question_sets').upsert({
-    id: questionSet.id,
-    source_id: questionSet.sourceId,
-    analysis_id: questionSet.analysisId,
-    mode: questionSet.mode,
-    question_format: questionSet.questionFormat,
-    question_count: questionSet.questionCount,
-    created_at: questionSet.createdAt,
-  });
-
-  await supabase.from('questions').upsert(
-    questionSet.questions.map((question) => ({
-      id: question.id,
-      question_set_id: questionSet.id,
-      format: question.format,
-      type: question.type,
-      bloom_level: question.bloomLevel,
-      difficulty: question.difficulty,
-      knowledge_point: question.knowledgePoint,
-      question: question.question,
-      context_hint: question.contextHint,
-      options: question.options,
-      correct_option_ids: question.correctOptionIds,
-      explanation: question.explanation,
-      expected_answer: question.expectedAnswer,
-      evaluation_criteria: question.evaluationCriteria,
-      review_score: question.reviewScore,
-    })),
+  await runSupabase(
+    supabase.from('question_sets').upsert({
+      id: questionSet.id,
+      source_id: questionSet.sourceId,
+      analysis_id: questionSet.analysisId,
+      mode: questionSet.mode,
+      question_format: questionSet.questionFormat,
+      question_count: questionSet.questionCount,
+      created_at: questionSet.createdAt,
+    }),
+    '保存题集到 Supabase',
   );
+
+  if (questionSet.questions.length) {
+    await runSupabase(
+      supabase.from('questions').upsert(
+        questionSet.questions.map((question) => ({
+          id: question.id,
+          question_set_id: questionSet.id,
+          format: question.format,
+          type: question.type,
+          bloom_level: question.bloomLevel,
+          difficulty: question.difficulty,
+          knowledge_point: question.knowledgePoint,
+          question: question.question,
+          context_hint: question.contextHint,
+          options: question.options,
+          correct_option_ids: question.correctOptionIds,
+          explanation: question.explanation,
+          expected_answer: question.expectedAnswer,
+          evaluation_criteria: question.evaluationCriteria,
+          review_score: question.reviewScore,
+        })),
+      ),
+      '保存题目到 Supabase',
+    );
+  }
 }
 
 function mapSourceRow(row: DbRow): LearningSource {
@@ -469,19 +537,22 @@ function asLearningInsight(value: unknown): LearningInsight {
 export async function persistReport(report: LearningReport): Promise<void> {
   if (!supabase) return;
 
-  await supabase.from('learning_reports').upsert({
-    id: report.id,
-    source_id: report.sourceId,
-    question_set_id: report.questionSetId,
-    mode: report.mode,
-    score: report.score,
-    ability: report.ability,
-    strengths: report.strengths,
-    weaknesses: report.weaknesses,
-    recommendations: report.recommendations,
-    learning_insight: report.learningInsight,
-    created_at: report.createdAt,
-  });
+  await runSupabase(
+    supabase.from('learning_reports').upsert({
+      id: report.id,
+      source_id: report.sourceId,
+      question_set_id: report.questionSetId,
+      mode: report.mode,
+      score: report.score,
+      ability: report.ability,
+      strengths: report.strengths,
+      weaknesses: report.weaknesses,
+      recommendations: report.recommendations,
+      learning_insight: report.learningInsight,
+      created_at: report.createdAt,
+    }),
+    '保存学习报告到 Supabase',
+  );
 }
 
 export async function persistStudySession(
@@ -491,25 +562,77 @@ export async function persistStudySession(
 ): Promise<void> {
   if (!supabase) return;
 
-  await supabase.from('answers').insert(
-    answers.map((answer) => ({
-      question_set_id: questionSetId,
-      question_id: answer.questionId,
-      answer: answer.answer,
-      selected_option_ids: answer.selectedOptionIds,
-    })),
-  );
+  await insertStudySession(questionSetId, answers, evaluations);
+}
 
-  await supabase.from('evaluations').insert(
-    evaluations.map((evaluation) => ({
-      question_set_id: questionSetId,
-      question_id: evaluation.questionId,
-      score: evaluation.score,
-      ability: evaluation.ability,
-      strengths: evaluation.strengths,
-      weaknesses: evaluation.weaknesses,
-      missing_points: evaluation.missingPoints,
-      follow_up_questions: evaluation.followUpQuestions,
-    })),
-  );
+function requireSupabaseClient(): NonNullable<typeof supabase> {
+  if (!supabase) {
+    throw new Error('Supabase 未连接：请在 EdgeOne 配置 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY 后重新部署。');
+  }
+
+  return supabase;
+}
+
+async function replaceStudySession(
+  questionSetId: string,
+  answers: UserAnswer[],
+  evaluations: Evaluation[],
+): Promise<void> {
+  const client = requireSupabaseClient();
+
+  await runSupabase(client.from('answers').delete().eq('question_set_id', questionSetId), '清理旧答题记录');
+  await runSupabase(client.from('evaluations').delete().eq('question_set_id', questionSetId), '清理旧批改记录');
+  await insertStudySession(questionSetId, answers, evaluations);
+}
+
+async function insertStudySession(
+  questionSetId: string,
+  answers: UserAnswer[],
+  evaluations: Evaluation[],
+): Promise<void> {
+  const client = requireSupabaseClient();
+
+  if (answers.length) {
+    await runSupabase(
+      client.from('answers').insert(
+        answers.map((answer) => ({
+          question_set_id: questionSetId,
+          question_id: answer.questionId,
+          answer: answer.answer,
+          selected_option_ids: answer.selectedOptionIds,
+        })),
+      ),
+      '保存答题记录到 Supabase',
+    );
+  }
+
+  if (evaluations.length) {
+    await runSupabase(
+      client.from('evaluations').insert(
+        evaluations.map((evaluation) => ({
+          question_set_id: questionSetId,
+          question_id: evaluation.questionId,
+          score: evaluation.score,
+          ability: evaluation.ability,
+          strengths: evaluation.strengths,
+          weaknesses: evaluation.weaknesses,
+          missing_points: evaluation.missingPoints,
+          follow_up_questions: evaluation.followUpQuestions,
+        })),
+      ),
+      '保存批改记录到 Supabase',
+    );
+  }
+}
+
+async function runSupabase<T extends { error: { message: string } | null }>(
+  request: PromiseLike<T>,
+  action: string,
+): Promise<T> {
+  const response = await request;
+  if (response.error) {
+    throw new Error(`${action}失败：${response.error.message}`);
+  }
+
+  return response;
 }

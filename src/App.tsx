@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clipboard,
+  CloudUpload,
   Database,
   FileText,
   History,
@@ -45,6 +46,7 @@ import {
   persistSource,
   persistStudySession,
   saveState,
+  syncStateToRemote,
 } from './services/repository';
 import {
   runAnswerEvaluation,
@@ -75,6 +77,7 @@ function App() {
   const [activeReportId, setActiveReportId] = useState('');
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -137,10 +140,11 @@ function App() {
     const existing = state.analyses.find((analysis) => analysis.sourceId === source.id);
     if (existing) return existing;
 
+    setNotice('');
     setLoading('正在分析知识结构');
     const result = await runKnowledgeAnalysis(source);
     setState((current) => ({ ...current, analyses: [...current.analyses, result.data] }));
-    void persistAnalysis(result.data);
+    void persistAnalysis(result.data).catch((persistError) => reportPersistenceError('知识分析', persistError));
     return result.data;
   }
 
@@ -149,11 +153,12 @@ function App() {
 
     try {
       setError('');
+      setNotice('');
       setLoading(questionFormat === 'choice' ? '已提交异步选择题生成任务，正在等待结果' : '已提交异步题目生成任务，正在等待结果');
       const analysis = await ensureAnalysis(selectedSource);
       const result = await runQuestionGeneration(selectedSource, analysis, mode, count, questionFormat);
       setState((current) => ({ ...current, questionSets: [...current.questionSets, result.data] }));
-      void persistQuestionSet(result.data);
+      void persistQuestionSet(result.data).catch((persistError) => reportPersistenceError('题目', persistError));
       setActiveSetId(result.data.id);
       setActiveView('answer');
     } catch (requestError) {
@@ -170,6 +175,7 @@ function App() {
 
     try {
       setError('');
+      setNotice('');
       setLoading(questionSet.questionFormat === 'choice' ? '正在核对选择题答案' : '已提交异步批改任务，正在等待结果');
       const evaluationResult = await runAnswerEvaluation(questionSet, answers);
       const reportResult = await runLearningReport(source, analysis, questionSet, evaluationResult.data);
@@ -180,8 +186,9 @@ function App() {
         evaluations: { ...current.evaluations, [questionSet.id]: evaluationResult.data },
         reports: [...current.reports, reportResult.data],
       }));
-      void persistStudySession(questionSet.id, answers, evaluationResult.data);
-      void persistReport(reportResult.data);
+      void Promise.all([persistStudySession(questionSet.id, answers, evaluationResult.data), persistReport(reportResult.data)]).catch(
+        (persistError) => reportPersistenceError('答题和批改记录', persistError),
+      );
       setActiveReportId(reportResult.data.id);
       setActiveView('feedback');
     } catch (requestError) {
@@ -192,12 +199,39 @@ function App() {
   }
 
   function handleAddSource(source: LearningSource) {
+    setNotice('');
     setState((current) => ({ ...current, sources: [source, ...current.sources] }));
     setSelectedSourceId(source.id);
-    void persistSource(source);
+    void persistSource(source).catch((persistError) => reportPersistenceError('素材', persistError));
+  }
+
+  async function handleSyncToSupabase() {
+    try {
+      setError('');
+      setNotice('');
+      setLoading('正在同步本地数据到 Supabase');
+      const result = await syncStateToRemote(state);
+      const remoteState = await loadRemoteState();
+      if (remoteState) {
+        setState((current) => mergeAppState(current, remoteState));
+      }
+      setNotice(
+        `已同步到 Supabase：素材 ${result.sources}，题集 ${result.questionSets}，答题 ${result.answers}，批改 ${result.evaluations}，报告 ${result.reports}。手机端刷新即可查看。`,
+      );
+    } catch (syncError) {
+      setError(syncError instanceof Error ? syncError.message : '同步到 Supabase 失败，请检查环境变量和表权限。');
+    } finally {
+      setLoading('');
+    }
+  }
+
+  function reportPersistenceError(label: string, persistError: unknown) {
+    const message = persistError instanceof Error ? persistError.message : '未知错误';
+    setError(`${label}已保存在当前浏览器，但没有写入 Supabase：${message}`);
   }
 
   function resetDemo() {
+    setNotice('');
     setState(initialState);
     setSelectedSourceId(initialState.sources[0].id);
     setActiveSetId('');
@@ -296,6 +330,15 @@ function App() {
             </div>
             <button
               type="button"
+              onClick={() => void handleSyncToSupabase()}
+              disabled={!isSupabaseConfigured || Boolean(loading)}
+              className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-line px-3 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <CloudUpload size={16} aria-hidden="true" />
+              同步到 Supabase
+            </button>
+            <button
+              type="button"
               onClick={resetDemo}
               className="mt-3 min-h-11 rounded-lg border border-line px-3 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
             >
@@ -325,6 +368,11 @@ function App() {
           {error && (
             <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">
               {error}
+            </div>
+          )}
+          {notice && (
+            <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-700">
+              {notice}
             </div>
           )}
           <div className="animate-reveal">{view}</div>
