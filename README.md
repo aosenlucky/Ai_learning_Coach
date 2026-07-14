@@ -61,26 +61,32 @@ VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
 VITE_USE_REMOTE_AI=true
 VITE_ALLOW_REMOTE_FALLBACK=false
+VITE_USE_ASYNC_EVALUATION=true
+VITE_ASYNC_EVALUATION_ENDPOINT=
+VITE_ASYNC_EVALUATION_POLL_MS=2500
+VITE_ASYNC_EVALUATION_TIMEOUT_MS=900000
 VITE_REMOTE_EVAL_CONCURRENCY=1
 VITE_AI_ENDPOINT=/api/ai
 
 DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-v4-pro
-DEEPSEEK_EVALUATOR_THINKING=disabled
+DEEPSEEK_EVALUATOR_THINKING=enabled
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MAX_TOKENS=
 DEEPSEEK_TIMEOUT_MS=7500
+DEEPSEEK_EVALUATOR_MAX_TOKENS=3200
+DEEPSEEK_EVALUATOR_REQUEST_TIMEOUT_MS=120000
+EVALUATION_JOB_SLICE_MS=130000
 ```
 
 说明：
 
 - `VITE_USE_REMOTE_AI=false` 时，前端使用本地 skill 引擎演示完整闭环。
 - `VITE_USE_REMOTE_AI=true` 时，前端会请求 `VITE_AI_ENDPOINT`。
+- `VITE_USE_ASYNC_EVALUATION=true` 时，开放题批改会提交到 Supabase Edge Function 异步任务，不再走 EdgeOne 同步函数。
+- `VITE_ASYNC_EVALUATION_ENDPOINT` 可留空；默认使用 `${VITE_SUPABASE_URL}/functions/v1/evaluate-answer-job`。
 - `VITE_ALLOW_REMOTE_FALLBACK=false` 时，开放题批改如果远程模型失败会直接报错，不会静默切回关键词/规则批改。
-- `VITE_REMOTE_EVAL_CONCURRENCY` 控制开放题逐题远程批改的并发数，默认 1；跑稳后可以调到 2 或 3。
-- `DEEPSEEK_MAX_TOKENS` 是可选全局覆盖项；留空时函数会按 skill 自动设置输出预算，且开放题批改会被硬限制在 1200 以内。
-- `DEEPSEEK_TIMEOUT_MS` 是函数内主动中止 DeepSeek 调用的时间，默认开放题批改 7500ms，且开放题批改会被硬限制在 8000ms 以内。
-- `DEEPSEEK_EVALUATOR_THINKING=disabled` 表示开放题批改仍使用 Pro 模型，但关闭单题批改的思考模式，避免 EdgeOne 短函数超时；题目生成默认仍启用思考模式。
+- `DEEPSEEK_EVALUATOR_THINKING=enabled` 表示开放题批改使用 Pro 模型的 thinking 能力。
 - `DEEPSEEK_API_KEY` 只应配置在 Serverless 环境，不要暴露到前端。
 
 ## Supabase 配置
@@ -88,7 +94,20 @@ DEEPSEEK_TIMEOUT_MS=7500
 1. 新建 Supabase 项目。
 2. 在 SQL Editor 执行 `supabase/schema.sql`。
 3. 在 `.env.local` 配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`。
-4. MVP 默认个人使用，未开启复杂多用户权限；正式联网前建议补充 RLS 策略。
+4. 部署异步批改函数：
+
+```bash
+supabase functions deploy evaluate-answer-job
+supabase secrets set DEEPSEEK_API_KEY=你的Key
+supabase secrets set DEEPSEEK_MODEL=deepseek-v4-pro
+supabase secrets set DEEPSEEK_EVALUATOR_THINKING=enabled
+supabase secrets set DEEPSEEK_BASE_URL=https://api.deepseek.com
+supabase secrets set DEEPSEEK_EVALUATOR_MAX_TOKENS=3200
+supabase secrets set DEEPSEEK_EVALUATOR_REQUEST_TIMEOUT_MS=120000
+supabase secrets set EVALUATION_JOB_SLICE_MS=130000
+```
+
+5. MVP 默认个人使用，未开启复杂多用户权限；正式联网前建议补充 RLS 策略。
 
 ## DeepSeek 配置
 
@@ -107,7 +126,7 @@ npm run sync:prompts
 ```env
 DEEPSEEK_API_KEY=你的 Key
 DEEPSEEK_MODEL=deepseek-v4-pro
-DEEPSEEK_EVALUATOR_THINKING=disabled
+DEEPSEEK_EVALUATOR_THINKING=enabled
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MAX_TOKENS=
 DEEPSEEK_TIMEOUT_MS=7500
@@ -120,6 +139,10 @@ DEEPSEEK_TIMEOUT_MS=7500
 ```env
 VITE_USE_REMOTE_AI=true
 VITE_ALLOW_REMOTE_FALLBACK=false
+VITE_USE_ASYNC_EVALUATION=true
+VITE_ASYNC_EVALUATION_ENDPOINT=
+VITE_ASYNC_EVALUATION_POLL_MS=2500
+VITE_ASYNC_EVALUATION_TIMEOUT_MS=900000
 VITE_REMOTE_EVAL_CONCURRENCY=1
 VITE_AI_ENDPOINT=/api/ai
 VITE_SUPABASE_URL=你的 Supabase Project URL
@@ -127,7 +150,7 @@ VITE_SUPABASE_ANON_KEY=你的 Supabase anon public key
 ```
 
 说明：开放题批改会强制走 DeepSeek；选择题有明确正确答案，判分不需要调用大模型。
-如果开放题批改出现 `504 CLOUD_FUNCTION_INVOCATION_TIMEOUT`，说明 EdgeOne 函数等待模型返回超时。当前实现已经把开放题拆成逐题请求、压缩单题输入，并为 `answer-evaluator` 使用较小的默认输出预算；仍超时时，保持 Pro 模型不变，下一步应把 `/api/ai` 迁移到支持更长执行时间的后端或改成异步任务，而不是降级模型。
+开放题批改使用 Supabase `evaluate-answer-job` 异步任务，后台使用 `deepseek-v4-pro` 且 `DEEPSEEK_EVALUATOR_THINKING=enabled`。EdgeOne 的 `/api/ai` 仍用于知识分析、题目生成和学习建议。
 
 ## EdgeOne Pages 部署
 

@@ -26,6 +26,15 @@ const remoteEvaluationConcurrency =
   Number.isFinite(configuredRemoteEvaluationConcurrency) && configuredRemoteEvaluationConcurrency > 0
     ? configuredRemoteEvaluationConcurrency
     : 1;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+const asyncEvaluationEnabled = import.meta.env.VITE_USE_ASYNC_EVALUATION !== 'false';
+const configuredAsyncEvaluationEndpoint = import.meta.env.VITE_ASYNC_EVALUATION_ENDPOINT as string | undefined;
+const asyncEvaluationEndpoint =
+  configuredAsyncEvaluationEndpoint?.trim() ||
+  (supabaseUrl ? `${supabaseUrl}/functions/v1/evaluate-answer-job` : '');
+const asyncEvaluationPollMs = Number(import.meta.env.VITE_ASYNC_EVALUATION_POLL_MS ?? 2500);
+const asyncEvaluationTimeoutMs = Number(import.meta.env.VITE_ASYNC_EVALUATION_TIMEOUT_MS ?? 900000);
 
 class RemoteAiError extends Error {
   constructor(message: string) {
@@ -69,6 +78,73 @@ async function callRemote<T>(skill: string, input: unknown, required = false): P
     }
     return null;
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function getAsyncEvaluationHeaders(): HeadersInit {
+  if (!supabaseAnonKey) return { 'Content-Type': 'application/json' };
+  return {
+    'Content-Type': 'application/json',
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${supabaseAnonKey}`,
+  };
+}
+
+async function callAsyncEvaluationJob<T>(body: unknown): Promise<T> {
+  if (!asyncEvaluationEndpoint || !supabaseAnonKey) {
+    throw new RemoteAiError('异步批改未配置：请设置 VITE_SUPABASE_URL、VITE_SUPABASE_ANON_KEY，或 VITE_ASYNC_EVALUATION_ENDPOINT。');
+  }
+
+  const response = await fetch(asyncEvaluationEndpoint, {
+    method: 'POST',
+    headers: getAsyncEvaluationHeaders(),
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  let payload: { error?: string } = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = { error: compactRemoteMessage(text, response.statusText) };
+  }
+  if (!response.ok) {
+    throw new RemoteAiError(`异步批改任务失败：${payload.error ?? response.statusText}`);
+  }
+  return payload as T;
+}
+
+async function runAsyncEvaluationJob(questionSet: QuestionSet, answers: UserAnswer[]): Promise<Evaluation[]> {
+  const started = await callAsyncEvaluationJob<{ jobId: string; status: string; progress: number; total: number }>({
+    action: 'start',
+    questionSet,
+    answers,
+  });
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < asyncEvaluationTimeoutMs) {
+    await sleep(asyncEvaluationPollMs);
+    const status = await callAsyncEvaluationJob<{
+      jobId: string;
+      status: 'queued' | 'processing' | 'succeeded' | 'failed';
+      progress: number;
+      total: number;
+      error?: string;
+      evaluations?: Evaluation[];
+    }>({
+      action: 'status',
+      jobId: started.jobId,
+    });
+
+    if (status.status === 'succeeded' && status.evaluations) return status.evaluations;
+    if (status.status === 'failed') {
+      throw new RemoteAiError(`异步批改任务失败：${status.error ?? '未知错误'}`);
+    }
+  }
+
+  throw new RemoteAiError('异步批改任务等待超时，请稍后在历史记录中重试或检查 Supabase Function 日志。');
 }
 
 async function mapWithConcurrency<T, R>(
@@ -157,6 +233,16 @@ export async function runAnswerEvaluation(
 ): Promise<SkillResult<Evaluation[]>> {
   const openQuestions = questionSet.questions.filter((question) => question.format !== 'choice');
   if (openQuestions.length && remoteEnabled) {
+    if (asyncEvaluationEnabled) {
+      const remote = await runAsyncEvaluationJob(questionSet, answers);
+      const remoteByQuestionId = new Map(remote.map((evaluation) => [evaluation.questionId, evaluation]));
+      const data = questionSet.questions.map((question) => {
+        const answer = findAnswer(question.id, answers);
+        return remoteByQuestionId.get(question.id) ?? evaluateAnswer(question, answer);
+      });
+      return { data, usedRemote: true };
+    }
+
     const remote = await evaluateOpenQuestionsRemotely(questionSet, answers, !allowRemoteFallback);
     if (remote.length) {
       const remoteByQuestionId = new Map(remote.map((evaluation) => [evaluation.questionId, evaluation]));

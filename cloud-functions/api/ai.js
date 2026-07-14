@@ -94,7 +94,7 @@ function getTimeoutMs(env, skill) {
 function getThinkingConfig(env, skill) {
   const configured =
     skill === 'answer-evaluator'
-      ? env.DEEPSEEK_EVALUATOR_THINKING ?? env.DEEPSEEK_THINKING ?? 'disabled'
+      ? env.DEEPSEEK_EVALUATOR_THINKING ?? env.DEEPSEEK_THINKING ?? 'enabled'
       : env.DEEPSEEK_THINKING ?? 'enabled';
   return { type: configured === 'disabled' ? 'disabled' : 'enabled' };
 }

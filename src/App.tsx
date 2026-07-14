@@ -133,7 +133,7 @@ function App() {
 
     try {
       setError('');
-      setLoading(questionSet.questionFormat === 'choice' ? '正在核对选择题答案' : 'AI 正在批改答案');
+      setLoading(questionSet.questionFormat === 'choice' ? '正在核对选择题答案' : '已提交异步批改任务，正在等待结果');
       const evaluationResult = await runAnswerEvaluation(questionSet, answers);
       const reportResult = await runLearningReport(source, analysis, questionSet, evaluationResult.data);
 
