@@ -36,6 +36,16 @@ function normalizeSkillData(skill, parsed) {
   return parsed;
 }
 
+function getDefaultMaxTokens(skill, input) {
+  if (skill === 'answer-evaluator') return 2200;
+  if (skill === 'learning-recommendation') return 3000;
+  if (skill === 'knowledge-analyzer') return 3000;
+  if (skill === 'question-generator') {
+    return input?.questionFormat === 'choice' ? 10000 : 6500;
+  }
+  return 4096;
+}
+
 export async function onRequest(context) {
   const { request, env = {} } = context;
 
@@ -60,6 +70,7 @@ export async function onRequest(context) {
 
   const baseUrl = env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com';
   const model = env.DEEPSEEK_MODEL ?? 'deepseek-v4-pro';
+  const maxTokens = Number(env.DEEPSEEK_MAX_TOKENS) || getDefaultMaxTokens(skill, input);
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -69,7 +80,7 @@ export async function onRequest(context) {
     body: JSON.stringify({
       model,
       temperature: 0.2,
-      max_tokens: 12000,
+      max_tokens: maxTokens,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: `${systemPrompt}\n\nReturn valid JSON only.` },

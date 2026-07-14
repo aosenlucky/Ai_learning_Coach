@@ -21,12 +21,27 @@ import { buildLearningInsight, buildLearningRecommendation } from '../ai-skills/
 const endpoint = (import.meta.env.VITE_AI_ENDPOINT as string | undefined) ?? '/api/ai';
 const remoteEnabled = import.meta.env.VITE_USE_REMOTE_AI === 'true';
 const allowRemoteFallback = import.meta.env.VITE_ALLOW_REMOTE_FALLBACK === 'true';
+const configuredRemoteEvaluationConcurrency = Number(import.meta.env.VITE_REMOTE_EVAL_CONCURRENCY ?? 3);
+const remoteEvaluationConcurrency =
+  Number.isFinite(configuredRemoteEvaluationConcurrency) && configuredRemoteEvaluationConcurrency > 0
+    ? configuredRemoteEvaluationConcurrency
+    : 3;
 
 class RemoteAiError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RemoteAiError';
   }
+}
+
+function compactRemoteMessage(message: string, fallback: string): string {
+  const text = message
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (text || fallback).slice(0, 500);
 }
 
 async function callRemote<T>(skill: string, input: unknown, required = false): Promise<T | null> {
@@ -41,7 +56,7 @@ async function callRemote<T>(skill: string, input: unknown, required = false): P
 
     if (!response.ok) {
       const message = await response.text();
-      if (required) throw new RemoteAiError(`${skill} 远程调用失败：${message || response.statusText}`);
+      if (required) throw new RemoteAiError(`${skill} 远程调用失败：${compactRemoteMessage(message, response.statusText)}`);
       return null;
     }
     const payload = (await response.json()) as { data?: T };
@@ -54,6 +69,56 @@ async function callRemote<T>(skill: string, input: unknown, required = false): P
     }
     return null;
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  task: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.max(1, Math.min(concurrency || 1, items.length));
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await task(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+function findAnswer(questionId: string, answers: UserAnswer[]): UserAnswer {
+  return answers.find((item) => item.questionId === questionId) ?? { questionId, answer: '' };
+}
+
+async function evaluateOpenQuestionsRemotely(
+  questionSet: QuestionSet,
+  answers: UserAnswer[],
+  required: boolean,
+): Promise<Evaluation[]> {
+  const openQuestions = questionSet.questions.filter((question) => question.format !== 'choice');
+  const evaluations = await mapWithConcurrency(openQuestions, remoteEvaluationConcurrency, async (question) => {
+    const answer = findAnswer(question.id, answers);
+    const singleQuestionSet: QuestionSet = {
+      ...questionSet,
+      questionCount: 1,
+      questions: [question],
+    };
+    const remote = await callRemote<Evaluation[]>(
+      'answer-evaluator',
+      { questionSet: singleQuestionSet, answers: [answer] },
+      required,
+    );
+    const evaluation = remote?.[0];
+    if (evaluation) return { ...evaluation, questionId: evaluation.questionId || question.id };
+    if (required) throw new RemoteAiError(`answer-evaluator 没有返回第 ${question.id} 题的批改结果。`);
+    return null;
+  });
+
+  return evaluations.filter((evaluation): evaluation is Evaluation => Boolean(evaluation));
 }
 
 export async function runKnowledgeAnalysis(source: LearningSource): Promise<SkillResult<KnowledgeAnalysis>> {
@@ -90,14 +155,21 @@ export async function runAnswerEvaluation(
   questionSet: QuestionSet,
   answers: UserAnswer[],
 ): Promise<SkillResult<Evaluation[]>> {
-  const choiceOnly = questionSet.questions.every((question) => question.format === 'choice');
-  if (!choiceOnly) {
-    const remote = await callRemote<Evaluation[]>('answer-evaluator', { questionSet, answers }, remoteEnabled && !allowRemoteFallback);
-    if (remote) return { data: remote, usedRemote: true };
+  const openQuestions = questionSet.questions.filter((question) => question.format !== 'choice');
+  if (openQuestions.length && remoteEnabled) {
+    const remote = await evaluateOpenQuestionsRemotely(questionSet, answers, !allowRemoteFallback);
+    if (remote.length) {
+      const remoteByQuestionId = new Map(remote.map((evaluation) => [evaluation.questionId, evaluation]));
+      const data = questionSet.questions.map((question) => {
+        const answer = findAnswer(question.id, answers);
+        return remoteByQuestionId.get(question.id) ?? evaluateAnswer(question, answer);
+      });
+      return { data, usedRemote: true };
+    }
   }
 
   const data = questionSet.questions.map((question) => {
-    const answer = answers.find((item) => item.questionId === question.id) ?? { questionId: question.id, answer: '' };
+    const answer = findAnswer(question.id, answers);
     return evaluateAnswer(question, answer);
   });
 

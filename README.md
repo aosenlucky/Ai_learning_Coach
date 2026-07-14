@@ -61,11 +61,13 @@ VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
 VITE_USE_REMOTE_AI=true
 VITE_ALLOW_REMOTE_FALLBACK=false
+VITE_REMOTE_EVAL_CONCURRENCY=3
 VITE_AI_ENDPOINT=/api/ai
 
 DEEPSEEK_API_KEY=
 DEEPSEEK_MODEL=deepseek-v4-pro
 DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MAX_TOKENS=
 ```
 
 说明：
@@ -73,6 +75,8 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 - `VITE_USE_REMOTE_AI=false` 时，前端使用本地 skill 引擎演示完整闭环。
 - `VITE_USE_REMOTE_AI=true` 时，前端会请求 `VITE_AI_ENDPOINT`。
 - `VITE_ALLOW_REMOTE_FALLBACK=false` 时，开放题批改如果远程模型失败会直接报错，不会静默切回关键词/规则批改。
+- `VITE_REMOTE_EVAL_CONCURRENCY` 控制开放题逐题远程批改的并发数，默认 3；如果 EdgeOne 或模型限流，可以降到 1 或 2。
+- `DEEPSEEK_MAX_TOKENS` 是可选全局覆盖项；留空时函数会按 skill 自动设置输出预算。
 - `DEEPSEEK_API_KEY` 只应配置在 Serverless 环境，不要暴露到前端。
 
 ## Supabase 配置
@@ -100,6 +104,7 @@ npm run sync:prompts
 DEEPSEEK_API_KEY=你的 Key
 DEEPSEEK_MODEL=deepseek-v4-pro
 DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MAX_TOKENS=
 ```
 
 如果你的 DeepSeek 控制台模型名不同，只需要调整 `DEEPSEEK_MODEL`。
@@ -109,12 +114,14 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```env
 VITE_USE_REMOTE_AI=true
 VITE_ALLOW_REMOTE_FALLBACK=false
+VITE_REMOTE_EVAL_CONCURRENCY=3
 VITE_AI_ENDPOINT=/api/ai
 VITE_SUPABASE_URL=你的 Supabase Project URL
 VITE_SUPABASE_ANON_KEY=你的 Supabase anon public key
 ```
 
 说明：开放题批改会强制走 DeepSeek；选择题有明确正确答案，判分不需要调用大模型。
+如果开放题批改出现 `504 CLOUD_FUNCTION_INVOCATION_TIMEOUT`，说明 EdgeOne 函数等待模型返回超时。当前实现已经把开放题拆成逐题请求，并为 `answer-evaluator` 使用较小的默认输出预算；仍超时时，优先把 `VITE_REMOTE_EVAL_CONCURRENCY` 降到 `1`，或改用响应更快的 `DEEPSEEK_MODEL`。
 
 ## EdgeOne Pages 部署
 
