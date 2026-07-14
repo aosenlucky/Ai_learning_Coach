@@ -41,10 +41,13 @@ create table if not exists questions (
   difficulty integer not null,
   knowledge_point text not null,
   question text not null,
+  context_hint text,
   expected_answer text not null,
   evaluation_criteria text[] default '{}',
   review_score integer not null default 0
 );
+
+alter table questions add column if not exists context_hint text;
 
 create table if not exists answers (
   id uuid primary key default gen_random_uuid(),

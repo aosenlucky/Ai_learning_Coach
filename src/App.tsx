@@ -587,7 +587,7 @@ function GenerateView({
             <input
               type="number"
               min={3}
-              max={8}
+              max={15}
               value={count}
               onChange={(event) => setCount(Number(event.target.value))}
               className="h-11 w-full rounded-lg border border-line bg-white px-3"
@@ -685,6 +685,11 @@ function AnswerView({
               </div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">{question.knowledgePoint}</span>
             </div>
+            {question.contextHint && (
+              <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/70 p-3 text-sm leading-6 text-slate-700">
+                {question.contextHint}
+              </div>
+            )}
             <textarea
               value={answers[question.id] ?? ''}
               onChange={(event) => update(question.id, event.target.value)}
@@ -782,8 +787,11 @@ function FeedbackView({
                   <span className="text-xl font-semibold tabular-nums">{evaluation.score}</span>
                 </div>
                 <div className="mt-4 space-y-3">
+                  <MiniList title="参考答案" items={[question?.expectedAnswer ?? '暂无参考答案']} />
+                  {question?.evaluationCriteria?.length ? <MiniList title="评价要点" items={question.evaluationCriteria} /> : null}
                   <MiniList title="优势" items={evaluation.strengths} />
                   <MiniList title="缺口" items={evaluation.weaknesses} />
+                  {evaluation.missingPoints.length ? <MiniList title="缺失材料点" items={evaluation.missingPoints} /> : null}
                   <MiniList title="追问" items={evaluation.followUpQuestions} />
                 </div>
               </article>
@@ -996,9 +1004,14 @@ function buildObsidianInsightMarkdown(
         '',
         question?.question ?? '',
         '',
+        question?.contextHint ? `> ${question.contextHint}` : '',
+        '',
+        `**参考答案**：${question?.expectedAnswer ?? '暂无参考答案'}`,
+        '',
         `- 得分：${evaluation.score}`,
         `- 优势：${evaluation.strengths.join('；')}`,
         `- 缺口：${evaluation.weaknesses.join('；')}`,
+        `- 缺失材料点：${evaluation.missingPoints.join('；') || '无'}`,
         `- 追问：${evaluation.followUpQuestions.join('；')}`,
         '',
       );

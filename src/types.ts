@@ -46,6 +46,7 @@ export interface Question {
   difficulty: 1 | 2 | 3 | 4 | 5;
   knowledgePoint: string;
   question: string;
+  contextHint?: string;
   expectedAnswer: string;
   evaluationCriteria: string[];
   reviewScore: number;

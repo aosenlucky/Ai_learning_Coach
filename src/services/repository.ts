@@ -86,6 +86,7 @@ export async function persistQuestionSet(questionSet: QuestionSet): Promise<void
       difficulty: question.difficulty,
       knowledge_point: question.knowledgePoint,
       question: question.question,
+      context_hint: question.contextHint,
       expected_answer: question.expectedAnswer,
       evaluation_criteria: question.evaluationCriteria,
       review_score: question.reviewScore,
