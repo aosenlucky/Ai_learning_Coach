@@ -191,50 +191,88 @@ function generateChoiceQuestions(analysis: KnowledgeAnalysis, requestedCount?: n
 
 function buildChoiceQuestion(type: QuestionType, point: string, related: string, topic: string, index: number): string {
   const stems: Record<QuestionType, string> = {
-    concept: `以下哪项最准确地概括了材料中「${shortText(point, 32)}」的含义？`,
-    principle: `关于「${shortText(point, 32)}」背后的因果关系，哪项最符合材料逻辑？`,
-    comparison: `如果要区分「${shortText(point, 18)}」与「${shortText(related, 18)}」，哪项判断更准确？`,
-    critical: `关于「${shortText(point, 32)}」的适用边界，哪项判断更稳妥？`,
-    scenario: `把「${topic}」迁移到工作场景时，哪项动作最优先？`,
-    expression: `向他人解释「${topic}」时，哪项表达结构更合适？`,
+    concept: `围绕「${shortText(point, 32)}」，哪项理解更接近材料的核心判断？`,
+    principle: `关于「${shortText(point, 32)}」形成影响的原因，哪项分析更符合材料？`,
+    comparison: `如果比较「${shortText(point, 18)}」与「${shortText(related, 18)}」，哪项区分更合适？`,
+    critical: `关于「${shortText(point, 32)}」的适用条件，哪项判断更稳妥？`,
+    scenario: `把「${topic}」迁移到工作场景时，哪项推进方式更合适？`,
+    expression: `向他人解释「${topic}」时，哪项表达取向更合适？`,
   };
   return `${stems[type]}（第 ${index + 1} 题）`;
 }
 
 function buildChoiceCorrectAnswer(type: QuestionType, point: string, related: string, materialCase: string): QuestionOption {
+  const textByType: Record<QuestionType, string> = {
+    concept: `${shortText(point, 34)}需要放在价值定位、承载入口和落地条件的组合关系中理解。`,
+    principle: `${shortText(point, 34)}的结果来自入口定位、资源承载、生态协同和商业闭环的共同作用。`,
+    comparison: `${shortText(point, 24)}更偏向关键判断本身，${shortText(related, 24)}更偏向相邻环节或落地条件。`,
+    critical: `${shortText(point, 34)}成立依赖目标客户、资源供给、商业回报和生态参与方协同。`,
+    scenario: `应先锁定真实客户问题，再围绕${shortText(materialCase, 24)}设计资产沉淀、分发和复盘机制。`,
+    expression: `应先讲清现实问题，再用${shortText(materialCase, 24)}解释机制，最后落到价值和边界。`,
+  };
   const rationaleByType: Record<QuestionType, string> = {
-    concept: `材料强调的不是表层口号，而是「${point}」背后的机制、条件和边界。`,
-    principle: `这项判断能把「${point}」拆成原因、组织机制与结果，而不是把结果归因于单一因素。`,
-    comparison: `这项判断能区分「${point}」与「${related}」的作用边界，而不是把二者混成同一种做法。`,
-    critical: `这项判断承认「${point}」有适用条件，并能提示过度使用或条件缺失时的风险。`,
-    scenario: `这项动作能把材料中的机制落到真实场景，并保留目标、责任、指标和风险兜底。`,
-    expression: `这项表达先给结论，再用「${materialCase}」支撑，最后落到现实价值和行动建议。`,
+    concept: `该选项把材料判断放回机制和条件中理解，没有停留在标签化复述。`,
+    principle: `该选项覆盖入口、资源、生态和商业闭环等多因素关系。`,
+    comparison: `该选项保留了两个材料点的层级差异，没有把相邻概念混成一类。`,
+    critical: `该选项说明观点成立需要前置条件，并保留失效边界。`,
+    scenario: `该选项能把材料机制迁移到真实业务动作，而不是只描述愿景。`,
+    expression: `该选项兼顾问题、机制、价值和边界，适合对外说明。`,
   };
   return {
     id: 'A',
-    text: rationaleByType[type],
+    text: textByType[type],
     rationale: rationaleByType[type],
   };
 }
 
 function buildChoiceDistractors(type: QuestionType, point: string, related: string, topic: string): QuestionOption[] {
-  return [
+  const shared = [
     {
       id: 'B',
-      text: `只要加强宣传和口号动员，就能自然解决「${shortText(point, 22)}」的问题。`,
-      rationale: '这是把复杂机制简化成单点口号，容易忽略组织、利益、任务和环境条件。',
+      text: `${shortText(point, 30)}更适合作为底层技术能力问题处理，商业闭环可以在能力成熟后再补齐。`,
+      rationale: '该选项把系统性问题过度压缩为技术成熟度问题，弱化了商业和生态条件。',
     },
     {
       id: 'C',
-      text: `「${shortText(point, 22)}」主要取决于个人性格，与组织机制和场景条件关系不大。`,
-      rationale: '这是个人英雄主义式解释，无法覆盖材料中的组织机制和场景约束。',
+      text: `${shortText(related || topic, 30)}应优先作为流量入口建设，资产沉淀和伙伴机制属于后续运营问题。`,
+      rationale: '该选项把入口优先级抬得过高，忽略材料中资产、平台和生态的共同作用。',
     },
     {
       id: 'D',
-      text: `只要复制「${shortText(related || topic, 22)}」的做法，不需要判断适用条件。`,
-      rationale: '这是机械迁移，忽略材料中的边界、时机和风险。',
+      text: `${shortText(point, 30)}可以通过先做完整平台架构来解决，再逐步寻找客户场景验证。`,
+      rationale: '该选项偏向从内部架构出发，容易弱化客户问题和场景牵引。',
     },
   ];
+
+  if (type === 'comparison') {
+    return [
+      {
+        id: 'B',
+        text: `${shortText(point, 24)}和${shortText(related, 24)}都主要指向同一个生态入口，只是表述层级不同。`,
+        rationale: '该选项抹平了两个材料点之间的作用边界。',
+      },
+      {
+        id: 'C',
+        text: `${shortText(point, 24)}更偏资源供给，${shortText(related, 24)}更偏技术实现，因此二者关系不大。`,
+        rationale: '该选项把相邻概念割裂开，忽略它们可能存在的链路关系。',
+      },
+      shared[2],
+    ];
+  }
+
+  if (type === 'critical') {
+    return [
+      {
+        id: 'B',
+        text: `${shortText(point, 30)}主要取决于战略判断准确度，客户侧和伙伴侧变量影响相对有限。`,
+        rationale: '该选项低估了客户、伙伴和商业回报对观点成立的约束。',
+      },
+      shared[0],
+      shared[1],
+    ];
+  }
+
+  return shared;
 }
 
 function shuffleOptions(options: QuestionOption[], seed: number): QuestionOption[] {

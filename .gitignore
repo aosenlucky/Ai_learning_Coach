@@ -9,3 +9,4 @@ vite.config.js
 vite.config.d.ts
 vite-dev.out.log
 vite-dev.err.log
+supabase/.temp

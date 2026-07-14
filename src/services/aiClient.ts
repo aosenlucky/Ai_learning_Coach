@@ -210,8 +210,16 @@ export async function runQuestionGeneration(
   requestedCount?: number,
   questionFormat: QuestionFormat = 'open',
 ): Promise<SkillResult<QuestionSet>> {
-  const remote = await callRemote<Question[]>('question-generator', { source, analysis, mode, requestedCount, questionFormat });
-  const questions = remote ?? generateQuestions(analysis, mode, requestedCount, questionFormat);
+  const remoteRequired = remoteEnabled && !allowRemoteFallback;
+  const remote = await callRemote<Question[]>(
+    'question-generator',
+    { source, analysis, mode, requestedCount, questionFormat },
+    remoteRequired,
+  );
+  if (remoteRequired && (!remote || !remote.length)) {
+    throw new RemoteAiError('question-generator 远程调用没有返回有效题目，已阻止本地模板题 fallback。');
+  }
+  const questions = remote?.length ? remote : generateQuestions(analysis, mode, requestedCount, questionFormat);
   const setId = createId('qset');
   const questionSet: QuestionSet = {
     id: setId,

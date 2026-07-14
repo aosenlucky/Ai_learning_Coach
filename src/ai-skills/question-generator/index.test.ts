@@ -42,5 +42,8 @@ describe('generateQuestions', () => {
     expect(questions.every((question) => question.options?.length === 4)).toBe(true);
     expect(questions.every((question) => question.correctOptionIds?.length === 1)).toBe(true);
     expect(questions.every((question) => question.expectedAnswer.includes('正确答案'))).toBe(true);
+    expect(questions.map((question) => question.options?.map((option) => option.text).join(' ')).join(' ')).not.toMatch(
+      /只要|宣传和口号|个人性格|不需要判断/,
+    );
   });
 });
