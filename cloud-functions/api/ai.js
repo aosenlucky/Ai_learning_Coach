@@ -1,10 +1,4 @@
-const PROMPTS = {
-  'knowledge-analyzer': `Analyze the provided learning source before any question generation. Return JSON with topics, concepts, logic, cases, applications, controversies, strategy, createdAt.`,
-  'question-generator': `Generate high-value learning questions from the analysis. Avoid rote-memory questions and avoid duplicated questions. Each question must be concrete, name the exact concept/cause chain/comparison pair, and include contextHint, expectedAnswer, evaluationCriteria, reviewScore. Return a JSON array with type, bloomLevel, difficulty, knowledgePoint, question, contextHint, expectedAnswer, evaluationCriteria, reviewScore.`,
-  'answer-evaluator': `Evaluate whether the user truly understands. Do not rely on keyword matching. Feedback must be specific to each answer. Detect blank or confusion-only answers. Return a JSON array of evaluations with score, ability, strengths, weaknesses, missingPoints, followUpQuestions.`,
-  'learning-recommendation': `Generate learning recommendations and an optional report patch. Return JSON with recommendations: mastery, gaps, supplements, practiceTasks, nextReviewFocus.`,
-  'skill-router': `Route source type to one strategy mode. Return JSON only.`,
-};
+import { PROMPTS } from './generated-prompts.js';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',

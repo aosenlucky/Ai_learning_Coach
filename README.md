@@ -84,6 +84,14 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 
 Serverless 函数位于 `cloud-functions/api/ai.js`。EdgeOne Makers 会把它映射到 `/api/ai`，使用 DeepSeek OpenAI 兼容的 `/chat/completions` 调用方式。
 
+Prompt 的唯一维护位置是 `prompts/*/prompt.md`。构建前会自动运行：
+
+```bash
+npm run sync:prompts
+```
+
+该命令会生成 `cloud-functions/api/generated-prompts.js`，供 EdgeOne Cloud Function import。平时只需要改 `prompts/`，不要手动改生成文件。
+
 需要在 EdgeOne Pages 的环境变量中配置：
 
 ```env
