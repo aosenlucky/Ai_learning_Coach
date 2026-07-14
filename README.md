@@ -61,13 +61,14 @@ VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
 VITE_USE_REMOTE_AI=true
 VITE_ALLOW_REMOTE_FALLBACK=false
-VITE_REMOTE_EVAL_CONCURRENCY=3
+VITE_REMOTE_EVAL_CONCURRENCY=1
 VITE_AI_ENDPOINT=/api/ai
 
 DEEPSEEK_API_KEY=
-DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MAX_TOKENS=
+DEEPSEEK_TIMEOUT_MS=7500
 ```
 
 说明：
@@ -75,8 +76,9 @@ DEEPSEEK_MAX_TOKENS=
 - `VITE_USE_REMOTE_AI=false` 时，前端使用本地 skill 引擎演示完整闭环。
 - `VITE_USE_REMOTE_AI=true` 时，前端会请求 `VITE_AI_ENDPOINT`。
 - `VITE_ALLOW_REMOTE_FALLBACK=false` 时，开放题批改如果远程模型失败会直接报错，不会静默切回关键词/规则批改。
-- `VITE_REMOTE_EVAL_CONCURRENCY` 控制开放题逐题远程批改的并发数，默认 3；如果 EdgeOne 或模型限流，可以降到 1 或 2。
-- `DEEPSEEK_MAX_TOKENS` 是可选全局覆盖项；留空时函数会按 skill 自动设置输出预算。
+- `VITE_REMOTE_EVAL_CONCURRENCY` 控制开放题逐题远程批改的并发数，默认 1；跑稳后可以调到 2 或 3。
+- `DEEPSEEK_MAX_TOKENS` 是可选全局覆盖项；留空时函数会按 skill 自动设置输出预算，且开放题批改会被硬限制在 1200 以内。
+- `DEEPSEEK_TIMEOUT_MS` 是函数内主动中止 DeepSeek 调用的时间，默认开放题批改 7500ms，且开放题批改会被硬限制在 8000ms 以内。
 - `DEEPSEEK_API_KEY` 只应配置在 Serverless 环境，不要暴露到前端。
 
 ## Supabase 配置
@@ -102,26 +104,27 @@ npm run sync:prompts
 
 ```env
 DEEPSEEK_API_KEY=你的 Key
-DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MAX_TOKENS=
+DEEPSEEK_TIMEOUT_MS=7500
 ```
 
-如果你的 DeepSeek 控制台模型名不同，只需要调整 `DEEPSEEK_MODEL`。
+建议在 EdgeOne 这类短函数环境使用响应更快的模型，例如 `deepseek-v4-flash`。如果你的 DeepSeek 控制台模型名不同，只需要调整 `DEEPSEEK_MODEL`。
 
 前端构建环境还需要配置：
 
 ```env
 VITE_USE_REMOTE_AI=true
 VITE_ALLOW_REMOTE_FALLBACK=false
-VITE_REMOTE_EVAL_CONCURRENCY=3
+VITE_REMOTE_EVAL_CONCURRENCY=1
 VITE_AI_ENDPOINT=/api/ai
 VITE_SUPABASE_URL=你的 Supabase Project URL
 VITE_SUPABASE_ANON_KEY=你的 Supabase anon public key
 ```
 
 说明：开放题批改会强制走 DeepSeek；选择题有明确正确答案，判分不需要调用大模型。
-如果开放题批改出现 `504 CLOUD_FUNCTION_INVOCATION_TIMEOUT`，说明 EdgeOne 函数等待模型返回超时。当前实现已经把开放题拆成逐题请求，并为 `answer-evaluator` 使用较小的默认输出预算；仍超时时，优先把 `VITE_REMOTE_EVAL_CONCURRENCY` 降到 `1`，或改用响应更快的 `DEEPSEEK_MODEL`。
+如果开放题批改出现 `504 CLOUD_FUNCTION_INVOCATION_TIMEOUT`，说明 EdgeOne 函数等待模型返回超时。当前实现已经把开放题拆成逐题请求、压缩单题输入，并为 `answer-evaluator` 使用较小的默认输出预算；仍超时时，确认 `DEEPSEEK_MODEL=deepseek-v4-flash`，并保持 `VITE_REMOTE_EVAL_CONCURRENCY=1`。
 
 ## EdgeOne Pages 部署
 

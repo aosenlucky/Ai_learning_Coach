@@ -21,11 +21,11 @@ import { buildLearningInsight, buildLearningRecommendation } from '../ai-skills/
 const endpoint = (import.meta.env.VITE_AI_ENDPOINT as string | undefined) ?? '/api/ai';
 const remoteEnabled = import.meta.env.VITE_USE_REMOTE_AI === 'true';
 const allowRemoteFallback = import.meta.env.VITE_ALLOW_REMOTE_FALLBACK === 'true';
-const configuredRemoteEvaluationConcurrency = Number(import.meta.env.VITE_REMOTE_EVAL_CONCURRENCY ?? 3);
+const configuredRemoteEvaluationConcurrency = Number(import.meta.env.VITE_REMOTE_EVAL_CONCURRENCY ?? 1);
 const remoteEvaluationConcurrency =
   Number.isFinite(configuredRemoteEvaluationConcurrency) && configuredRemoteEvaluationConcurrency > 0
     ? configuredRemoteEvaluationConcurrency
-    : 3;
+    : 1;
 
 class RemoteAiError extends Error {
   constructor(message: string) {
