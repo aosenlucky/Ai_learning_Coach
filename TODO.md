@@ -16,7 +16,7 @@
 - 增加 EdgeOne 本地函数调试脚本。
 - 将 DeepSeek prompt 在部署阶段从 `prompts/` 注入 Serverless。
 - 增加端到端测试，覆盖素材输入、出题、答题和反馈。
-- 增加导出功能：Markdown Learning Insight、CSV 历史记录。
+- 增加 CSV 历史记录导出。
 
 ## 产品优化
 

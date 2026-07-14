@@ -5,6 +5,7 @@ import {
   Brain,
   CheckCircle2,
   ChevronRight,
+  Clipboard,
   Database,
   FileText,
   History,
@@ -85,6 +86,7 @@ function App() {
     state.reports.find((report) => report.questionSetId === activeQuestionSet?.id) ??
     state.reports.at(-1);
   const activeEvaluations = activeReport ? state.evaluations[activeReport.questionSetId] ?? [] : [];
+  const activeReportSource = activeReport ? state.sources.find((source) => source.id === activeReport.sourceId) : undefined;
 
   const latestReport = state.reports.at(-1);
   const averageScore = useMemo(() => {
@@ -178,7 +180,12 @@ function App() {
       <EmptyView title="还没有题目" action="去生成测试" onAction={() => setActiveView('generate')} />
     ),
     feedback: activeReport ? (
-      <FeedbackView report={activeReport} evaluations={activeEvaluations} questionSet={activeQuestionSet} />
+      <FeedbackView
+        report={activeReport}
+        evaluations={activeEvaluations}
+        questionSet={activeQuestionSet}
+        source={activeReportSource}
+      />
     ) : (
       <EmptyView title="还没有 AI 反馈" action="开始答题" onAction={() => setActiveView('generate')} />
     ),
@@ -291,7 +298,7 @@ function DashboardView({
       <section className="panel p-5 sm:p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-3xl">
-            <p className="text-sm font-semibold text-rose">主动提问 · 批改反馈 · 能力追踪</p>
+            <p className="text-sm font-medium text-slate-500">学习闭环</p>
             <h3 className="mt-3 text-3xl font-semibold leading-tight tracking-normal sm:text-5xl">
               把笔记变成真正可输出的能力。
             </h3>
@@ -309,7 +316,7 @@ function DashboardView({
         <div className="mt-8 grid gap-3 sm:grid-cols-3">
           <MetricCard icon={FileText} label="素材" value={state.sources.length.toString()} tone="blue" />
           <MetricCard icon={CheckCircle2} label="学习记录" value={state.reports.length.toString()} tone="green" />
-          <MetricCard icon={Activity} label="平均分" value={averageScore ? averageScore.toString() : '--'} tone="pink" />
+          <MetricCard icon={Activity} label="平均分" value={averageScore ? averageScore.toString() : '--'} tone="neutral" />
         </div>
 
         {latestReport ? (
@@ -701,11 +708,26 @@ function FeedbackView({
   report,
   evaluations,
   questionSet,
+  source,
 }: {
   report: AppState['reports'][number];
   evaluations: Evaluation[];
   questionSet?: QuestionSet;
+  source?: LearningSource;
 }) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  async function copyToObsidian() {
+    try {
+      await navigator.clipboard.writeText(buildObsidianInsightMarkdown(report, evaluations, questionSet, source));
+      setCopyState('copied');
+      window.setTimeout(() => setCopyState('idle'), 2400);
+    } catch {
+      setCopyState('failed');
+      window.setTimeout(() => setCopyState('idle'), 2400);
+    }
+  }
+
   return (
     <div className="grid gap-4 xl:grid-cols-[0.82fr_1.18fr]">
       <section className="panel p-5 sm:p-6">
@@ -724,7 +746,17 @@ function FeedbackView({
             <p className="text-sm text-slate-500">Learning Insight</p>
             <h3 className="text-xl font-semibold">{report.learningInsight.topic}</h3>
           </div>
-          <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">{formatDate(report.createdAt)}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void copyToObsidian()}
+              className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-line px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              {copyState === 'copied' ? <CheckCircle2 size={16} aria-hidden="true" /> : <Clipboard size={16} aria-hidden="true" />}
+              {copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制到 Obsidian'}
+            </button>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-600">{formatDate(report.createdAt)}</span>
+          </div>
         </div>
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
@@ -893,12 +925,12 @@ function MetricCard({
   icon: typeof FileText;
   label: string;
   value: string;
-  tone: 'blue' | 'green' | 'pink';
+  tone: 'blue' | 'green' | 'neutral';
 }) {
   const toneClass = {
     blue: 'bg-blue-50 text-cobalt',
     green: 'bg-emerald-50 text-mint',
-    pink: 'bg-pink-50 text-rose',
+    neutral: 'bg-slate-100 text-slate-600',
   }[tone];
 
   return (
@@ -910,6 +942,70 @@ function MetricCard({
       <p className="mt-1 text-3xl font-semibold tabular-nums">{value}</p>
     </div>
   );
+}
+
+function buildObsidianInsightMarkdown(
+  report: AppState['reports'][number],
+  evaluations: Evaluation[],
+  questionSet?: QuestionSet,
+  source?: LearningSource,
+): string {
+  const lines = [
+    `# Learning Insight - ${report.learningInsight.topic}`,
+    '',
+    `- 来源：${source?.title ?? report.learningInsight.topic}`,
+    `- 日期：${new Date(report.createdAt).toLocaleString('zh-CN')}`,
+    `- 模式：${report.mode === 'exam' ? '考试模式' : 'AI 陪练模式'}`,
+    `- 总分：${report.score}`,
+    '',
+    '## 能力画像',
+    '',
+    `- 概念：${report.ability.concept}`,
+    `- 逻辑：${report.ability.logic}`,
+    `- 应用：${report.ability.application}`,
+    `- 批判：${report.ability.critical}`,
+    `- 表达：${report.ability.expression}`,
+    '',
+    '## 当前掌握',
+    '',
+    report.recommendations.mastery,
+    '',
+    '## 知识漏洞',
+    '',
+    ...report.recommendations.gaps.map((item) => `- ${item}`),
+    '',
+    '## 建议补充',
+    '',
+    ...report.recommendations.supplements.map((item) => `- ${item}`),
+    '',
+    '## 实践任务',
+    '',
+    ...report.recommendations.practiceTasks.map((item) => `- ${item}`),
+    '',
+    '## 下一次复习重点',
+    '',
+    ...report.recommendations.nextReviewFocus.map((item) => `- ${item}`),
+  ];
+
+  if (questionSet && evaluations.length) {
+    lines.push('', '## 逐题反馈', '');
+    evaluations.forEach((evaluation, index) => {
+      const question = questionSet.questions.find((item) => item.id === evaluation.questionId);
+      lines.push(
+        `### Q${index + 1}`,
+        '',
+        question?.question ?? '',
+        '',
+        `- 得分：${evaluation.score}`,
+        `- 优势：${evaluation.strengths.join('；')}`,
+        `- 缺口：${evaluation.weaknesses.join('；')}`,
+        `- 追问：${evaluation.followUpQuestions.join('；')}`,
+        '',
+      );
+    });
+  }
+
+  return lines.join('\n');
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

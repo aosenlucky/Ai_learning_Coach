@@ -127,3 +127,9 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 - 增加 Obsidian Vault 与 Anki 同步。
 - 接入 PDF、网页解析和语音回答。
 - 增加学习计划、复习间隔和知识图谱。
+
+## Obsidian 工作流
+
+当前建议用“复制 Obsidian Markdown 正文到素材管理”的方式导入测试素材。答题结束后，可在 AI 反馈页点击“复制到 Obsidian”，把 Learning Insight 以 Markdown 形式追加回 Obsidian。
+
+详细方案见 [docs/obsidian-workflow.md](./docs/obsidian-workflow.md)。
