@@ -26,6 +26,7 @@ import type {
   KnowledgeAnalysis,
   LearningMode,
   LearningSource,
+  QuestionFormat,
   QuestionSet,
   SourceType,
   UserAnswer,
@@ -71,6 +72,7 @@ function App() {
   const [activeSetId, setActiveSetId] = useState('');
   const [activeReportId, setActiveReportId] = useState('');
   const [loading, setLoading] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     saveState(state);
@@ -105,17 +107,23 @@ function App() {
     return result.data;
   }
 
-  async function handleGenerate(mode: LearningMode, count?: number) {
+  async function handleGenerate(mode: LearningMode, count?: number, questionFormat: QuestionFormat = 'open') {
     if (!selectedSource) return;
 
-    setLoading(mode === 'exam' ? '正在生成高价值题目' : '正在准备 AI 陪练问题');
-    const analysis = await ensureAnalysis(selectedSource);
-    const result = await runQuestionGeneration(selectedSource, analysis, mode, count);
-    setState((current) => ({ ...current, questionSets: [...current.questionSets, result.data] }));
-    void persistQuestionSet(result.data);
-    setActiveSetId(result.data.id);
-    setActiveView('answer');
-    setLoading('');
+    try {
+      setError('');
+      setLoading(questionFormat === 'choice' ? '正在生成选择题' : mode === 'exam' ? '正在生成高价值题目' : '正在准备 AI 陪练问题');
+      const analysis = await ensureAnalysis(selectedSource);
+      const result = await runQuestionGeneration(selectedSource, analysis, mode, count, questionFormat);
+      setState((current) => ({ ...current, questionSets: [...current.questionSets, result.data] }));
+      void persistQuestionSet(result.data);
+      setActiveSetId(result.data.id);
+      setActiveView('answer');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '生成题目失败，请稍后重试。');
+    } finally {
+      setLoading('');
+    }
   }
 
   async function handleSubmitAnswers(questionSet: QuestionSet, answers: UserAnswer[]) {
@@ -123,21 +131,27 @@ function App() {
     const analysis = state.analyses.find((item) => item.id === questionSet.analysisId);
     if (!source || !analysis) return;
 
-    setLoading('AI 正在批改答案');
-    const evaluationResult = await runAnswerEvaluation(questionSet, answers);
-    const reportResult = await runLearningReport(source, analysis, questionSet, evaluationResult.data);
+    try {
+      setError('');
+      setLoading(questionSet.questionFormat === 'choice' ? '正在核对选择题答案' : 'AI 正在批改答案');
+      const evaluationResult = await runAnswerEvaluation(questionSet, answers);
+      const reportResult = await runLearningReport(source, analysis, questionSet, evaluationResult.data);
 
-    setState((current) => ({
-      ...current,
-      answers: { ...current.answers, [questionSet.id]: answers },
-      evaluations: { ...current.evaluations, [questionSet.id]: evaluationResult.data },
-      reports: [...current.reports, reportResult.data],
-    }));
-    void persistStudySession(questionSet.id, answers, evaluationResult.data);
-    void persistReport(reportResult.data);
-    setActiveReportId(reportResult.data.id);
-    setActiveView('feedback');
-    setLoading('');
+      setState((current) => ({
+        ...current,
+        answers: { ...current.answers, [questionSet.id]: answers },
+        evaluations: { ...current.evaluations, [questionSet.id]: evaluationResult.data },
+        reports: [...current.reports, reportResult.data],
+      }));
+      void persistStudySession(questionSet.id, answers, evaluationResult.data);
+      void persistReport(reportResult.data);
+      setActiveReportId(reportResult.data.id);
+      setActiveView('feedback');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '批改失败，请检查 AI 接口配置后重试。');
+    } finally {
+      setLoading('');
+    }
   }
 
   function handleAddSource(source: LearningSource) {
@@ -271,6 +285,11 @@ function App() {
               </button>
             </div>
           </header>
+          {error && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">
+              {error}
+            </div>
+          )}
           <div className="animate-reveal">{view}</div>
         </main>
       </div>
@@ -537,11 +556,18 @@ function GenerateView({
   selectedSourceId: string;
   onSelectSource: (id: string) => void;
   analysis?: KnowledgeAnalysis;
-  onGenerate: (mode: LearningMode, count?: number) => Promise<void>;
+  onGenerate: (mode: LearningMode, count?: number, questionFormat?: QuestionFormat) => Promise<void>;
 }) {
   const [mode, setMode] = useState<LearningMode>('exam');
+  const [questionFormat, setQuestionFormat] = useState<QuestionFormat>('open');
   const [count, setCount] = useState(5);
   const selectedSource = sources.find((source) => source.id === selectedSourceId) ?? sources[0];
+  const maxCount = questionFormat === 'choice' ? 50 : 15;
+
+  function updateQuestionFormat(value: QuestionFormat) {
+    setQuestionFormat(value);
+    setCount((current) => Math.min(Math.max(current, 3), value === 'choice' ? 50 : 15));
+  }
 
   return (
     <div className="grid gap-4 xl:grid-cols-[0.8fr_1.2fr]">
@@ -583,20 +609,41 @@ function GenerateView({
             </div>
           </div>
 
+          <div>
+            <p className="mb-2 text-sm font-medium text-slate-700">题目类型</p>
+            <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
+              {([
+                ['open', '开放题'],
+                ['choice', '选择题'],
+              ] as Array<[QuestionFormat, string]>).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => updateQuestionFormat(value)}
+                  className={`min-h-11 rounded-md text-sm font-semibold transition ${
+                    questionFormat === value ? 'bg-white text-ink shadow-sm' : 'text-slate-500 hover:text-ink'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <Field label="题目数量">
             <input
               type="number"
               min={3}
-              max={15}
+              max={maxCount}
               value={count}
-              onChange={(event) => setCount(Number(event.target.value))}
+              onChange={(event) => setCount(Math.min(Math.max(Number(event.target.value), 3), maxCount))}
               className="h-11 w-full rounded-lg border border-line bg-white px-3"
             />
           </Field>
 
           <button
             type="button"
-            onClick={() => void onGenerate(mode, count)}
+            onClick={() => void onGenerate(mode, count, questionFormat)}
             className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-cobalt px-4 text-sm font-semibold text-white shadow-lift transition hover:bg-blue-700"
           >
             <Sparkles size={17} aria-hidden="true" />
@@ -641,7 +688,7 @@ function AnswerView({
   onSubmit: (questionSet: QuestionSet, answers: UserAnswer[]) => Promise<void>;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>(() =>
-    Object.fromEntries((savedAnswers ?? []).map((answer) => [answer.questionId, answer.answer])),
+    Object.fromEntries((savedAnswers ?? []).map((answer) => [answer.questionId, answer.selectedOptionIds?.[0] ?? answer.answer])),
   );
 
   function update(questionId: string, answer: string) {
@@ -653,7 +700,9 @@ function AnswerView({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm text-slate-500">{questionSet.mode === 'exam' ? '考试模式' : 'AI 陪练模式'}</p>
-          <h3 className="text-xl font-semibold">{questionSet.questionCount} 道高价值问题</h3>
+          <h3 className="text-xl font-semibold">
+            {questionSet.questionCount} 道{questionSet.questionFormat === 'choice' ? '选择题' : '高价值问题'}
+          </h3>
         </div>
         <button
           type="button"
@@ -663,6 +712,7 @@ function AnswerView({
               questionSet.questions.map((question) => ({
                 questionId: question.id,
                 answer: answers[question.id] ?? '',
+                selectedOptionIds: question.format === 'choice' && answers[question.id] ? [answers[question.id]] : undefined,
               })),
             )
           }
@@ -690,12 +740,39 @@ function AnswerView({
                 {question.contextHint}
               </div>
             )}
-            <textarea
-              value={answers[question.id] ?? ''}
-              onChange={(event) => update(question.id, event.target.value)}
-              className="mt-4 min-h-36 w-full resize-y rounded-lg border border-line bg-white p-3 leading-7"
-              aria-label={`回答第 ${index + 1} 题`}
-            />
+            {question.format === 'choice' ? (
+              <div className="mt-4 grid gap-2">
+                {(question.options ?? []).map((option) => {
+                  const selected = answers[question.id] === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => update(question.id, option.id)}
+                      className={`flex min-h-12 items-start gap-3 rounded-lg border px-3 py-3 text-left text-sm leading-6 transition ${
+                        selected ? 'border-cobalt bg-blue-50 text-ink' : 'border-line bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-semibold ${
+                          selected ? 'bg-cobalt text-white' : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {option.id}
+                      </span>
+                      <span>{option.text}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <textarea
+                value={answers[question.id] ?? ''}
+                onChange={(event) => update(question.id, event.target.value)}
+                className="mt-4 min-h-36 w-full resize-y rounded-lg border border-line bg-white p-3 leading-7"
+                aria-label={`回答第 ${index + 1} 题`}
+              />
+            )}
             {questionSet.mode === 'coach' && (
               <div className="mt-3 flex items-center gap-2 text-sm text-slate-500">
                 <span className="h-2 w-2 rounded-full bg-mint" />
@@ -788,6 +865,9 @@ function FeedbackView({
                 </div>
                 <div className="mt-4 space-y-3">
                   <MiniList title="参考答案" items={[question?.expectedAnswer ?? '暂无参考答案']} />
+                  {question?.format === 'choice' && question.options?.length ? (
+                    <MiniList title="选项" items={question.options.map((option) => `${option.id}. ${option.text}`)} />
+                  ) : null}
                   {question?.evaluationCriteria?.length ? <MiniList title="评价要点" items={question.evaluationCriteria} /> : null}
                   <MiniList title="优势" items={evaluation.strengths} />
                   <MiniList title="缺口" items={evaluation.weaknesses} />

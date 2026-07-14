@@ -2,6 +2,8 @@ export type SourceType = 'book' | 'meeting' | 'article' | 'video-course' | 'tech
 
 export type LearningMode = 'exam' | 'coach';
 
+export type QuestionFormat = 'open' | 'choice';
+
 export type BloomLevel = 'Remember' | 'Understand' | 'Apply' | 'Analyze' | 'Evaluate' | 'Create';
 
 export type QuestionType =
@@ -13,6 +15,12 @@ export type QuestionType =
   | 'expression';
 
 export type AbilityKey = 'concept' | 'logic' | 'application' | 'critical' | 'expression';
+
+export interface QuestionOption {
+  id: string;
+  text: string;
+  rationale: string;
+}
 
 export interface LearningSource {
   id: string;
@@ -41,12 +49,16 @@ export interface KnowledgeAnalysis {
 export interface Question {
   id: string;
   setId: string;
+  format: QuestionFormat;
   type: QuestionType;
   bloomLevel: BloomLevel;
   difficulty: 1 | 2 | 3 | 4 | 5;
   knowledgePoint: string;
   question: string;
   contextHint?: string;
+  options?: QuestionOption[];
+  correctOptionIds?: string[];
+  explanation?: string;
   expectedAnswer: string;
   evaluationCriteria: string[];
   reviewScore: number;
@@ -57,6 +69,7 @@ export interface QuestionSet {
   sourceId: string;
   analysisId: string;
   mode: LearningMode;
+  questionFormat: QuestionFormat;
   questionCount: number;
   questions: Question[];
   createdAt: string;
@@ -65,6 +78,7 @@ export interface QuestionSet {
 export interface UserAnswer {
   questionId: string;
   answer: string;
+  selectedOptionIds?: string[];
 }
 
 export interface AbilityScore {

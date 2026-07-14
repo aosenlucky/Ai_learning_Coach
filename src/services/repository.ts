@@ -73,6 +73,7 @@ export async function persistQuestionSet(questionSet: QuestionSet): Promise<void
     source_id: questionSet.sourceId,
     analysis_id: questionSet.analysisId,
     mode: questionSet.mode,
+    question_format: questionSet.questionFormat,
     question_count: questionSet.questionCount,
     created_at: questionSet.createdAt,
   });
@@ -81,12 +82,16 @@ export async function persistQuestionSet(questionSet: QuestionSet): Promise<void
     questionSet.questions.map((question) => ({
       id: question.id,
       question_set_id: questionSet.id,
+      format: question.format,
       type: question.type,
       bloom_level: question.bloomLevel,
       difficulty: question.difficulty,
       knowledge_point: question.knowledgePoint,
       question: question.question,
       context_hint: question.contextHint,
+      options: question.options,
+      correct_option_ids: question.correctOptionIds,
+      explanation: question.explanation,
       expected_answer: question.expectedAnswer,
       evaluation_criteria: question.evaluationCriteria,
       review_score: question.reviewScore,
@@ -124,6 +129,7 @@ export async function persistStudySession(
       question_set_id: questionSetId,
       question_id: answer.questionId,
       answer: answer.answer,
+      selected_option_ids: answer.selectedOptionIds,
     })),
   );
 

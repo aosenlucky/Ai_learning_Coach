@@ -6,6 +6,7 @@ describe('reviewQuestionQuality', () => {
     const score = reviewQuestionQuality({
       id: 'q1',
       setId: 'set1',
+      format: 'open',
       type: 'scenario',
       bloomLevel: 'Apply',
       difficulty: 4,

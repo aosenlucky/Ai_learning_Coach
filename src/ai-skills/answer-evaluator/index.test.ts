@@ -5,6 +5,7 @@ import { evaluateAnswer } from './index';
 const question: Question = {
   id: 'q1',
   setId: 'set1',
+  format: 'open',
   type: 'principle',
   bloomLevel: 'Analyze',
   difficulty: 4,
@@ -30,5 +31,24 @@ describe('evaluateAnswer', () => {
 
     expect(evaluation.score).toBeLessThanOrEqual(28);
     expect(evaluation.weaknesses.join('')).toContain('还没有真正完成作答');
+  });
+
+  it('scores choice answers by the configured answer key', () => {
+    const choiceQuestion: Question = {
+      ...question,
+      format: 'choice',
+      options: [
+        { id: 'A', text: '口号动员即可解决问题', rationale: '过度简化。' },
+        { id: 'B', text: '方向、机制、利益和责任共同作用', rationale: '符合材料。' },
+        { id: 'C', text: '只取决于个人性格', rationale: '忽略组织机制。' },
+        { id: 'D', text: '复制历史做法即可', rationale: '忽略边界。' },
+      ],
+      correctOptionIds: ['B'],
+      explanation: '材料强调系统机制，而不是单点因素。',
+      expectedAnswer: '正确答案：B。材料强调系统机制。',
+    };
+
+    expect(evaluateAnswer(choiceQuestion, { questionId: choiceQuestion.id, answer: 'B', selectedOptionIds: ['B'] }).score).toBe(100);
+    expect(evaluateAnswer(choiceQuestion, { questionId: choiceQuestion.id, answer: 'A', selectedOptionIds: ['A'] }).score).toBe(0);
   });
 });

@@ -26,6 +26,16 @@ function parseJson(content) {
   }
 }
 
+function normalizeSkillData(skill, parsed) {
+  if (skill === 'question-generator') {
+    return Array.isArray(parsed) ? parsed : parsed.questions;
+  }
+  if (skill === 'answer-evaluator') {
+    return Array.isArray(parsed) ? parsed : parsed.evaluations;
+  }
+  return parsed;
+}
+
 export async function onRequest(context) {
   const { request, env = {} } = context;
 
@@ -59,7 +69,7 @@ export async function onRequest(context) {
     body: JSON.stringify({
       model,
       temperature: 0.2,
-      max_tokens: 4096,
+      max_tokens: 12000,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: `${systemPrompt}\n\nReturn valid JSON only.` },
@@ -79,7 +89,12 @@ export async function onRequest(context) {
   }
 
   try {
-    return jsonResponse({ data: parseJson(content) });
+    const parsed = parseJson(content);
+    const data = normalizeSkillData(skill, parsed);
+    if (!data) {
+      return jsonResponse({ error: `DeepSeek JSON did not include data for ${skill}.` }, 502);
+    }
+    return jsonResponse({ data });
   } catch (error) {
     return jsonResponse({ error: error instanceof Error ? error.message : 'Invalid JSON response.' }, 502);
   }

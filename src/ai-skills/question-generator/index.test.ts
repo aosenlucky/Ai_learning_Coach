@@ -33,4 +33,14 @@ describe('generateQuestions', () => {
     expect(questions.every((question) => question.contextHint && question.contextHint.length > 12)).toBe(true);
     expect(questions.some((question) => question.type === 'comparison' && question.question.includes('「') && question.question.includes('」'))).toBe(true);
   });
+
+  it('generates choice questions up to 50 with options and answer keys', () => {
+    const questions = generateQuestions(analysis, 'exam', 50, 'choice');
+
+    expect(questions).toHaveLength(50);
+    expect(questions.every((question) => question.format === 'choice')).toBe(true);
+    expect(questions.every((question) => question.options?.length === 4)).toBe(true);
+    expect(questions.every((question) => question.correctOptionIds?.length === 1)).toBe(true);
+    expect(questions.every((question) => question.expectedAnswer.includes('正确答案'))).toBe(true);
+  });
 });

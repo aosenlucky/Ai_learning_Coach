@@ -20,6 +20,10 @@ function scoreCoverage(answer: string, expected: string): { score: number; expec
 }
 
 export function evaluateAnswer(question: Question, answer: UserAnswer): Evaluation {
+  if (question.format === 'choice') {
+    return evaluateChoiceAnswer(question, answer);
+  }
+
   const content = answer.answer.trim();
   const unanswered = content.length < 8;
   const confusionOnly = /不知道|怎么回答|不清楚|没看懂|题目让我|无法回答/.test(content) && content.length < 90;
@@ -92,6 +96,52 @@ export function evaluateAnswer(question: Question, answer: UserAnswer): Evaluati
     weaknesses,
     missingPoints: expectedTerms.filter((term) => !content.includes(term)).slice(0, 6),
     followUpQuestions: buildFollowUps(question),
+  };
+}
+
+function evaluateChoiceAnswer(question: Question, answer: UserAnswer): Evaluation {
+  const selected = answer.selectedOptionIds?.length
+    ? answer.selectedOptionIds
+    : answer.answer.trim()
+      ? [answer.answer.trim()]
+      : [];
+  const correct = question.correctOptionIds ?? [];
+  const selectedSet = new Set(selected);
+  const isCorrect = selected.length === correct.length && correct.every((id) => selectedSet.has(id));
+  const score = isCorrect ? 100 : 0;
+  const selectedText = selected
+    .map((id) => question.options?.find((option) => option.id === id))
+    .filter(Boolean)
+    .map((option) => `${option?.id}. ${option?.text}`)
+    .join('；');
+  const correctText = correct
+    .map((id) => question.options?.find((option) => option.id === id))
+    .filter(Boolean)
+    .map((option) => `${option?.id}. ${option?.text}`)
+    .join('；');
+
+  return {
+    questionId: question.id,
+    score,
+    ability: {
+      concept: score,
+      logic: score,
+      application: question.type === 'scenario' ? score : Math.round(score * 0.8),
+      critical: question.type === 'critical' ? score : Math.round(score * 0.8),
+      expression: score,
+    },
+    strengths: isCorrect
+      ? [`选择正确，能够识别材料中「${question.knowledgePoint}」的关键判断。`]
+      : selected.length
+        ? [`已完成选择，但当前选项与材料中的关键判断不一致：${selectedText || selected.join('、')}。`]
+        : ['未选择答案。'],
+    weaknesses: isCorrect
+      ? ['可以继续用自己的话解释为什么其他选项不符合材料边界。']
+      : [`正确答案是 ${correct.join('、')}：${correctText || question.expectedAnswer}`],
+    missingPoints: isCorrect ? [] : [question.explanation ?? question.expectedAnswer],
+    followUpQuestions: isCorrect
+      ? [`请用一句话解释：为什么 ${correct.join('、')} 比其他选项更符合材料？`]
+      : [`请回到材料提示，说明为什么正确选项 ${correct.join('、')} 更符合「${question.knowledgePoint}」。`],
   };
 }
 

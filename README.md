@@ -8,14 +8,14 @@
 - 素材管理：标题、来源类型、主题、正文、标签、学习目标
 - Knowledge Analyzer：先分析知识结构，再生成题目
 - Skill Strategy Layer：按素材类型路由学习策略
-- Question Generator：生成应用、分析、批判、表达导向的问题
+- Question Generator：生成开放题或选择题，开放题偏应用、分析、批判、表达，选择题偏概念辨析
 - Question Quality Reviewer：对题目做 100 分制质量审核
-- Answer Evaluator：按概念、逻辑、应用、批判、表达评分
+- Answer Evaluator：开放题通过远程大模型批改，选择题按标准选项确定判分
 - Learning Recommendation：生成 Learning Insight 和下一轮强化建议
 - Dashboard、素材管理、测试生成、答题、AI反馈、历史记录、能力分析页面
 - Supabase schema 与可选持久化
 - DeepSeek Serverless API 调用入口
-- localStorage 本地兜底，未配置外部服务也能跑通
+- localStorage 本地兜底；开放题的本地批改仅用于开发演示，生产建议强制使用远程大模型
 
 ## 项目结构
 
@@ -59,7 +59,8 @@ npm run test:skills
 ```env
 VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
-VITE_USE_REMOTE_AI=false
+VITE_USE_REMOTE_AI=true
+VITE_ALLOW_REMOTE_FALLBACK=false
 VITE_AI_ENDPOINT=/api/ai
 
 DEEPSEEK_API_KEY=
@@ -71,6 +72,7 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 
 - `VITE_USE_REMOTE_AI=false` 时，前端使用本地 skill 引擎演示完整闭环。
 - `VITE_USE_REMOTE_AI=true` 时，前端会请求 `VITE_AI_ENDPOINT`。
+- `VITE_ALLOW_REMOTE_FALLBACK=false` 时，开放题批改如果远程模型失败会直接报错，不会静默切回关键词/规则批改。
 - `DEEPSEEK_API_KEY` 只应配置在 Serverless 环境，不要暴露到前端。
 
 ## Supabase 配置
@@ -102,6 +104,18 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 
 如果你的 DeepSeek 控制台模型名不同，只需要调整 `DEEPSEEK_MODEL`。
 
+前端构建环境还需要配置：
+
+```env
+VITE_USE_REMOTE_AI=true
+VITE_ALLOW_REMOTE_FALLBACK=false
+VITE_AI_ENDPOINT=/api/ai
+VITE_SUPABASE_URL=你的 Supabase Project URL
+VITE_SUPABASE_ANON_KEY=你的 Supabase anon public key
+```
+
+说明：开放题批改会强制走 DeepSeek；选择题有明确正确答案，判分不需要调用大模型。
+
 ## EdgeOne Pages 部署
 
 构建配置已经写入 `edgeone.json`：
@@ -131,7 +145,6 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 ## 后续优化建议
 
 - 加 RLS 与本地身份标识，保证个人数据隔离。
-- 把 Serverless prompt 从内联常量改为构建期注入，保持 `prompts/` 为唯一真源。
 - 增加 Obsidian Vault 与 Anki 同步。
 - 接入 PDF、网页解析和语音回答。
 - 增加学习计划、复习间隔和知识图谱。
