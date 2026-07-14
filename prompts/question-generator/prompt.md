@@ -9,10 +9,13 @@
 - mode：exam 或 coach
 - requestedCount：用户要求题目数量
 - questionFormat：open 或 choice
+- existingQuestions：已经生成的题目，用于分批生成时去重
+- generationInstruction：本批次的额外生成要求
 
 通用约束：
 
 - 不要生成重复题。即使用户要求 15 道开放题或 50 道选择题，也必须改变材料切片、考察角度、案例或适用边界。
+- 如果输入包含 existingQuestions，本次生成必须避开其中已有的知识点、题干结构、正确答案表达和干扰项结构。
 - 每道题必须贴合原始素材，不要凭空加入素材之外的概念。
 - 每道题必须包含 contextHint，给用户 1-2 句材料上下文提示，但不要直接泄露完整答案。
 - 每道题都要包含 expectedAnswer、evaluationCriteria、reviewScore。

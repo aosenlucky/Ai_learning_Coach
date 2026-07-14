@@ -98,6 +98,20 @@ create table if not exists evaluation_jobs (
   completed_at timestamptz
 );
 
+create table if not exists question_generation_jobs (
+  id uuid primary key default gen_random_uuid(),
+  status text not null default 'queued' check (status in ('queued', 'processing', 'succeeded', 'failed')),
+  progress integer not null default 0,
+  total integer not null default 0,
+  request jsonb not null,
+  result jsonb not null default '[]'::jsonb,
+  error text,
+  lease_expires_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
 create table if not exists learning_reports (
   id text primary key,
   source_id text not null references learning_sources(id) on delete cascade,
@@ -117,3 +131,5 @@ create index if not exists idx_question_sets_source_id on question_sets(source_i
 create index if not exists idx_learning_reports_created_at on learning_reports(created_at desc);
 create index if not exists idx_evaluation_jobs_status on evaluation_jobs(status);
 create index if not exists idx_evaluation_jobs_created_at on evaluation_jobs(created_at desc);
+create index if not exists idx_question_generation_jobs_status on question_generation_jobs(status);
+create index if not exists idx_question_generation_jobs_created_at on question_generation_jobs(created_at desc);

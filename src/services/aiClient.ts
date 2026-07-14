@@ -15,6 +15,7 @@ import { createId } from '../lib/id';
 import { average } from '../lib/text';
 import { analyzeKnowledge } from '../ai-skills/knowledge-analyzer';
 import { generateQuestions } from '../ai-skills/question-generator';
+import { reviewQuestionQuality } from '../ai-skills/question-quality-reviewer';
 import { evaluateAnswer } from '../ai-skills/answer-evaluator';
 import { buildLearningInsight, buildLearningRecommendation } from '../ai-skills/learning-recommendation';
 
@@ -35,6 +36,13 @@ const asyncEvaluationEndpoint =
   (supabaseUrl ? `${supabaseUrl}/functions/v1/evaluate-answer-job` : '');
 const asyncEvaluationPollMs = Number(import.meta.env.VITE_ASYNC_EVALUATION_POLL_MS ?? 2500);
 const asyncEvaluationTimeoutMs = Number(import.meta.env.VITE_ASYNC_EVALUATION_TIMEOUT_MS ?? 900000);
+const asyncQuestionGenerationEnabled = import.meta.env.VITE_USE_ASYNC_QUESTION_GENERATION !== 'false';
+const configuredAsyncQuestionGenerationEndpoint = import.meta.env.VITE_ASYNC_QUESTION_GENERATION_ENDPOINT as string | undefined;
+const asyncQuestionGenerationEndpoint =
+  configuredAsyncQuestionGenerationEndpoint?.trim() ||
+  (supabaseUrl ? `${supabaseUrl}/functions/v1/generate-question-job` : '');
+const asyncQuestionGenerationPollMs = Number(import.meta.env.VITE_ASYNC_QUESTION_GENERATION_POLL_MS ?? 2500);
+const asyncQuestionGenerationTimeoutMs = Number(import.meta.env.VITE_ASYNC_QUESTION_GENERATION_TIMEOUT_MS ?? 900000);
 
 class RemoteAiError extends Error {
   constructor(message: string) {
@@ -94,11 +102,19 @@ function getAsyncEvaluationHeaders(): HeadersInit {
 }
 
 async function callAsyncEvaluationJob<T>(body: unknown): Promise<T> {
-  if (!asyncEvaluationEndpoint || !supabaseAnonKey) {
-    throw new RemoteAiError('异步批改未配置：请设置 VITE_SUPABASE_URL、VITE_SUPABASE_ANON_KEY，或 VITE_ASYNC_EVALUATION_ENDPOINT。');
+  return callSupabaseAsyncJob<T>(asyncEvaluationEndpoint, body, '异步批改');
+}
+
+async function callAsyncQuestionGenerationJob<T>(body: unknown): Promise<T> {
+  return callSupabaseAsyncJob<T>(asyncQuestionGenerationEndpoint, body, '异步题目生成');
+}
+
+async function callSupabaseAsyncJob<T>(url: string, body: unknown, label: string): Promise<T> {
+  if (!url || !supabaseAnonKey) {
+    throw new RemoteAiError(`${label}未配置：请设置 VITE_SUPABASE_URL、VITE_SUPABASE_ANON_KEY，或对应的 Supabase Function endpoint。`);
   }
 
-  const response = await fetch(asyncEvaluationEndpoint, {
+  const response = await fetch(url, {
     method: 'POST',
     headers: getAsyncEvaluationHeaders(),
     body: JSON.stringify(body),
@@ -111,9 +127,49 @@ async function callAsyncEvaluationJob<T>(body: unknown): Promise<T> {
     payload = { error: compactRemoteMessage(text, response.statusText) };
   }
   if (!response.ok) {
-    throw new RemoteAiError(`异步批改任务失败：${payload.error ?? response.statusText}`);
+    throw new RemoteAiError(`${label}任务失败：${payload.error ?? response.statusText}`);
   }
   return payload as T;
+}
+
+async function runAsyncQuestionGenerationJob(
+  source: LearningSource,
+  analysis: KnowledgeAnalysis,
+  mode: LearningMode,
+  requestedCount: number | undefined,
+  questionFormat: QuestionFormat,
+): Promise<Question[]> {
+  const started = await callAsyncQuestionGenerationJob<{ jobId: string; status: string; progress: number; total: number }>({
+    action: 'start',
+    source,
+    analysis,
+    mode,
+    requestedCount,
+    questionFormat,
+  });
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < asyncQuestionGenerationTimeoutMs) {
+    await sleep(asyncQuestionGenerationPollMs);
+    const status = await callAsyncQuestionGenerationJob<{
+      jobId: string;
+      status: 'queued' | 'processing' | 'succeeded' | 'failed';
+      progress: number;
+      total: number;
+      error?: string;
+      questions?: Question[];
+    }>({
+      action: 'status',
+      jobId: started.jobId,
+    });
+
+    if (status.status === 'succeeded' && status.questions) return status.questions;
+    if (status.status === 'failed') {
+      throw new RemoteAiError(`异步题目生成任务失败：${status.error ?? '未知错误'}`);
+    }
+  }
+
+  throw new RemoteAiError('异步题目生成任务等待超时，请稍后重试或检查 Supabase Function 日志。');
 }
 
 async function runAsyncEvaluationJob(questionSet: QuestionSet, answers: UserAnswer[]): Promise<Evaluation[]> {
@@ -170,6 +226,24 @@ function findAnswer(questionId: string, answers: UserAnswer[]): UserAnswer {
   return answers.find((item) => item.questionId === questionId) ?? { questionId, answer: '' };
 }
 
+function normalizeGeneratedQuestion(question: Question, setId: string, questionFormat: QuestionFormat): Question {
+  const normalized: Question = {
+    ...question,
+    id: question.id || createId('question'),
+    setId,
+    format: question.format ?? questionFormat,
+    difficulty: question.difficulty ?? 3,
+    evaluationCriteria: question.evaluationCriteria ?? [],
+    expectedAnswer: question.expectedAnswer ?? question.explanation ?? '',
+    reviewScore: question.reviewScore ?? 0,
+  };
+
+  return {
+    ...normalized,
+    reviewScore: normalized.reviewScore || reviewQuestionQuality(normalized),
+  };
+}
+
 async function evaluateOpenQuestionsRemotely(
   questionSet: QuestionSet,
   answers: UserAnswer[],
@@ -211,11 +285,14 @@ export async function runQuestionGeneration(
   questionFormat: QuestionFormat = 'open',
 ): Promise<SkillResult<QuestionSet>> {
   const remoteRequired = remoteEnabled && !allowRemoteFallback;
-  const remote = await callRemote<Question[]>(
-    'question-generator',
-    { source, analysis, mode, requestedCount, questionFormat },
-    remoteRequired,
-  );
+  const remote =
+    remoteEnabled && asyncQuestionGenerationEnabled
+      ? await runAsyncQuestionGenerationJob(source, analysis, mode, requestedCount, questionFormat)
+      : await callRemote<Question[]>(
+          'question-generator',
+          { source, analysis, mode, requestedCount, questionFormat },
+          remoteRequired,
+        );
   if (remoteRequired && (!remote || !remote.length)) {
     throw new RemoteAiError('question-generator 远程调用没有返回有效题目，已阻止本地模板题 fallback。');
   }
@@ -228,7 +305,7 @@ export async function runQuestionGeneration(
     mode,
     questionFormat,
     questionCount: questions.length,
-    questions: questions.map((question) => ({ ...question, format: question.format ?? questionFormat, setId })),
+    questions: questions.map((question) => normalizeGeneratedQuestion(question, setId, questionFormat)),
     createdAt: new Date().toISOString(),
   };
 

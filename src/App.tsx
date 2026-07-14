@@ -112,7 +112,7 @@ function App() {
 
     try {
       setError('');
-      setLoading(questionFormat === 'choice' ? '正在生成选择题' : mode === 'exam' ? '正在生成高价值题目' : '正在准备 AI 陪练问题');
+      setLoading(questionFormat === 'choice' ? '已提交异步选择题生成任务，正在等待结果' : '已提交异步题目生成任务，正在等待结果');
       const analysis = await ensureAnalysis(selectedSource);
       const result = await runQuestionGeneration(selectedSource, analysis, mode, count, questionFormat);
       setState((current) => ({ ...current, questionSets: [...current.questionSets, result.data] }));

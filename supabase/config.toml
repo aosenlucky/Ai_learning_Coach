@@ -1,2 +1,5 @@
 [functions.evaluate-answer-job]
 verify_jwt = false
+
+[functions.generate-question-job]
+verify_jwt = false
