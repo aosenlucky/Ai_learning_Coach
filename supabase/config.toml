@@ -1,0 +1,2 @@
+[functions.evaluate-answer-job]
+verify_jwt = false
