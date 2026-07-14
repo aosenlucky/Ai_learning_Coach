@@ -1,8 +1,30 @@
-import type { AppState, Evaluation, KnowledgeAnalysis, LearningReport, LearningSource, QuestionSet, UserAnswer } from '../types';
+import type {
+  AbilityScore,
+  AppState,
+  BloomLevel,
+  Evaluation,
+  KnowledgeAnalysis,
+  LearningInsight,
+  LearningMode,
+  LearningRecommendation,
+  LearningReport,
+  LearningSource,
+  Question,
+  QuestionFormat,
+  QuestionOption,
+  QuestionSet,
+  QuestionType,
+  SourceType,
+  StrategyMode,
+  UserAnswer,
+} from '../types';
 import { sampleSource } from '../data/sample';
 import { supabase } from '../lib/supabase';
 
 const STORAGE_KEY = 'personal-ai-learning-coach-state';
+const abilityKeys = ['concept', 'logic', 'application', 'critical', 'expression'] as const;
+
+type DbRow = Record<string, unknown>;
 
 export const initialState: AppState = {
   sources: [sampleSource],
@@ -31,6 +53,81 @@ export function loadState(): AppState {
 
 export function saveState(state: AppState): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+export async function loadRemoteState(): Promise<AppState | null> {
+  if (!supabase) return null;
+
+  try {
+    const [
+      sourcesResponse,
+      analysesResponse,
+      questionSetsResponse,
+      questionsResponse,
+      answersResponse,
+      evaluationsResponse,
+      reportsResponse,
+    ] = await Promise.all([
+      supabase.from('learning_sources').select('*').order('created_at', { ascending: false }),
+      supabase.from('knowledge_analysis').select('*').order('created_at', { ascending: true }),
+      supabase.from('question_sets').select('*').order('created_at', { ascending: true }),
+      supabase.from('questions').select('*').order('id', { ascending: true }),
+      supabase.from('answers').select('*').order('created_at', { ascending: true }),
+      supabase.from('evaluations').select('*').order('created_at', { ascending: true }),
+      supabase.from('learning_reports').select('*').order('created_at', { ascending: true }),
+    ]);
+
+    const failedResponse = [
+      sourcesResponse,
+      analysesResponse,
+      questionSetsResponse,
+      questionsResponse,
+      answersResponse,
+      evaluationsResponse,
+      reportsResponse,
+    ].find((response) => response.error);
+
+    if (failedResponse?.error) throw failedResponse.error;
+
+    const sources = ((sourcesResponse.data ?? []) as DbRow[]).map(mapSourceRow);
+    const analyses = ((analysesResponse.data ?? []) as DbRow[]).map(mapAnalysisRow);
+    const questionsBySetId = groupQuestionsBySetId((questionsResponse.data ?? []) as DbRow[]);
+    const questionSets = ((questionSetsResponse.data ?? []) as DbRow[]).map((row) => ({
+      id: asString(row.id),
+      sourceId: asString(row.source_id),
+      analysisId: asString(row.analysis_id),
+      mode: (asString(row.mode) || 'exam') as LearningMode,
+      questionFormat: (asString(row.question_format) || 'open') as QuestionFormat,
+      questionCount: asNumber(row.question_count),
+      questions: questionsBySetId[asString(row.id)] ?? [],
+      createdAt: asString(row.created_at),
+    }));
+
+    return {
+      sources: sources.length ? sources : [sampleSource],
+      analyses,
+      questionSets,
+      answers: groupLatestAnswersBySetId((answersResponse.data ?? []) as DbRow[]),
+      evaluations: groupLatestEvaluationsBySetId((evaluationsResponse.data ?? []) as DbRow[]),
+      reports: ((reportsResponse.data ?? []) as DbRow[]).map(mapReportRow),
+    };
+  } catch (error) {
+    console.warn('Failed to load Supabase state', error);
+    return null;
+  }
+}
+
+export function mergeAppState(local: AppState, remote: AppState): AppState {
+  const localSources = isOnlySampleSource(local.sources) && hasUserSources(remote.sources) ? [] : local.sources;
+
+  return {
+    sources: mergeById(localSources, remote.sources).sort(sortByCreatedAtDesc),
+    analyses: mergeById(local.analyses, remote.analyses).sort(sortByCreatedAtAsc),
+    questionSets: mergeById(local.questionSets, remote.questionSets).sort(sortByCreatedAtAsc),
+    answers: mergeAnswerRecords(local.answers, remote.answers),
+    evaluations: mergeEvaluationRecords(local.evaluations, remote.evaluations),
+    reports: mergeById(local.reports, remote.reports).sort(sortByCreatedAtAsc),
+  };
 }
 
 export async function persistSource(source: LearningSource): Promise<void> {
@@ -97,6 +194,276 @@ export async function persistQuestionSet(questionSet: QuestionSet): Promise<void
       review_score: question.reviewScore,
     })),
   );
+}
+
+function mapSourceRow(row: DbRow): LearningSource {
+  return {
+    id: asString(row.id),
+    title: asString(row.title),
+    type: (asString(row.type) || 'article') as SourceType,
+    topic: asString(row.topic) || asString(row.title),
+    content: asString(row.content),
+    tags: asStringArray(row.tags),
+    goal: asString(row.learning_goal),
+    createdAt: asString(row.created_at),
+  };
+}
+
+function mapAnalysisRow(row: DbRow): KnowledgeAnalysis {
+  return {
+    id: asString(row.id),
+    sourceId: asString(row.source_id),
+    strategy: (asString(row.strategy) || 'Deep Understanding Mode') as StrategyMode,
+    topics: asStringArray(row.topics),
+    concepts: asStringArray(row.concepts),
+    logic: asStringArray(row.logic),
+    cases: asStringArray(row.cases),
+    applications: asStringArray(row.applications),
+    controversies: asStringArray(row.controversies),
+    createdAt: asString(row.created_at),
+  };
+}
+
+function mapQuestionRow(row: DbRow): Question {
+  return {
+    id: asString(row.id),
+    setId: asString(row.question_set_id),
+    format: (asString(row.format) || 'open') as QuestionFormat,
+    type: (asString(row.type) || 'concept') as QuestionType,
+    bloomLevel: (asString(row.bloom_level) || 'Understand') as BloomLevel,
+    difficulty: asDifficulty(row.difficulty),
+    knowledgePoint: asString(row.knowledge_point),
+    question: asString(row.question),
+    contextHint: optionalString(row.context_hint),
+    options: asQuestionOptions(row.options),
+    correctOptionIds: asStringArray(row.correct_option_ids),
+    explanation: optionalString(row.explanation),
+    expectedAnswer: asString(row.expected_answer),
+    evaluationCriteria: asStringArray(row.evaluation_criteria),
+    reviewScore: asNumber(row.review_score),
+  };
+}
+
+function mapReportRow(row: DbRow): LearningReport {
+  return {
+    id: asString(row.id),
+    sourceId: asString(row.source_id),
+    questionSetId: asString(row.question_set_id),
+    mode: (asString(row.mode) || 'exam') as LearningMode,
+    score: asNumber(row.score),
+    ability: asAbility(row.ability),
+    strengths: asStringArray(row.strengths),
+    weaknesses: asStringArray(row.weaknesses),
+    recommendations: asRecommendations(row.recommendations),
+    learningInsight: asLearningInsight(row.learning_insight),
+    createdAt: asString(row.created_at),
+  };
+}
+
+function groupQuestionsBySetId(rows: DbRow[]): Record<string, Question[]> {
+  return rows.reduce<Record<string, Question[]>>((grouped, row) => {
+    const question = mapQuestionRow(row);
+    if (!question.setId) return grouped;
+    grouped[question.setId] = [...(grouped[question.setId] ?? []), question];
+    return grouped;
+  }, {});
+}
+
+function groupLatestAnswersBySetId(rows: DbRow[]): Record<string, UserAnswer[]> {
+  const latestByQuestion = new Map<string, { questionSetId: string; createdAt: string; answer: UserAnswer }>();
+
+  rows.forEach((row) => {
+    const questionSetId = asString(row.question_set_id);
+    const questionId = asString(row.question_id);
+    if (!questionSetId || !questionId) return;
+
+    const createdAt = asString(row.created_at);
+    const key = `${questionSetId}:${questionId}`;
+    const current = latestByQuestion.get(key);
+    if (current && current.createdAt > createdAt) return;
+
+    latestByQuestion.set(key, {
+      questionSetId,
+      createdAt,
+      answer: {
+        questionId,
+        answer: asString(row.answer),
+        selectedOptionIds: asStringArray(row.selected_option_ids),
+      },
+    });
+  });
+
+  return Array.from(latestByQuestion.values()).reduce<Record<string, UserAnswer[]>>((grouped, item) => {
+    grouped[item.questionSetId] = [...(grouped[item.questionSetId] ?? []), item.answer];
+    return grouped;
+  }, {});
+}
+
+function groupLatestEvaluationsBySetId(rows: DbRow[]): Record<string, Evaluation[]> {
+  const latestByQuestion = new Map<string, { questionSetId: string; createdAt: string; evaluation: Evaluation }>();
+
+  rows.forEach((row) => {
+    const questionSetId = asString(row.question_set_id);
+    const questionId = asString(row.question_id);
+    if (!questionSetId || !questionId) return;
+
+    const createdAt = asString(row.created_at);
+    const key = `${questionSetId}:${questionId}`;
+    const current = latestByQuestion.get(key);
+    if (current && current.createdAt > createdAt) return;
+
+    latestByQuestion.set(key, {
+      questionSetId,
+      createdAt,
+      evaluation: {
+        questionId,
+        score: asNumber(row.score),
+        ability: asAbility(row.ability),
+        strengths: asStringArray(row.strengths),
+        weaknesses: asStringArray(row.weaknesses),
+        missingPoints: asStringArray(row.missing_points),
+        followUpQuestions: asStringArray(row.follow_up_questions),
+      },
+    });
+  });
+
+  return Array.from(latestByQuestion.values()).reduce<Record<string, Evaluation[]>>((grouped, item) => {
+    grouped[item.questionSetId] = [...(grouped[item.questionSetId] ?? []), item.evaluation];
+    return grouped;
+  }, {});
+}
+
+function mergeById<T extends { id: string }>(local: T[], remote: T[]): T[] {
+  const merged = new Map<string, T>();
+  local.forEach((item) => merged.set(item.id, item));
+  remote.forEach((item) => merged.set(item.id, item));
+  return Array.from(merged.values());
+}
+
+function mergeAnswerRecords(
+  local: Record<string, UserAnswer[]>,
+  remote: Record<string, UserAnswer[]>,
+): Record<string, UserAnswer[]> {
+  const questionSetIds = new Set([...Object.keys(local), ...Object.keys(remote)]);
+
+  return Array.from(questionSetIds).reduce<Record<string, UserAnswer[]>>((merged, questionSetId) => {
+    merged[questionSetId] = mergeByQuestionId(local[questionSetId] ?? [], remote[questionSetId] ?? []);
+    return merged;
+  }, {});
+}
+
+function mergeEvaluationRecords(
+  local: Record<string, Evaluation[]>,
+  remote: Record<string, Evaluation[]>,
+): Record<string, Evaluation[]> {
+  const questionSetIds = new Set([...Object.keys(local), ...Object.keys(remote)]);
+
+  return Array.from(questionSetIds).reduce<Record<string, Evaluation[]>>((merged, questionSetId) => {
+    merged[questionSetId] = mergeByQuestionId(local[questionSetId] ?? [], remote[questionSetId] ?? []);
+    return merged;
+  }, {});
+}
+
+function mergeByQuestionId<T extends { questionId: string }>(local: T[], remote: T[]): T[] {
+  const merged = new Map<string, T>();
+  local.forEach((item) => merged.set(item.questionId, item));
+  remote.forEach((item) => merged.set(item.questionId, item));
+  return Array.from(merged.values());
+}
+
+function isOnlySampleSource(sources: LearningSource[]): boolean {
+  return sources.length === 1 && sources[0]?.id === sampleSource.id;
+}
+
+function hasUserSources(sources: LearningSource[]): boolean {
+  return sources.some((source) => source.id !== sampleSource.id);
+}
+
+function sortByCreatedAtAsc(left: { createdAt: string }, right: { createdAt: string }): number {
+  return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+}
+
+function sortByCreatedAtDesc(left: { createdAt: string }, right: { createdAt: string }): number {
+  return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function optionalString(value: unknown): string | undefined {
+  const text = asString(value);
+  return text || undefined;
+}
+
+function asNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function asDifficulty(value: unknown): 1 | 2 | 3 | 4 | 5 {
+  const parsed = asNumber(value);
+  if (parsed >= 1 && parsed <= 5) return parsed as 1 | 2 | 3 | 4 | 5;
+  return 3;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asQuestionOptions(value: unknown): QuestionOption[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const options = value
+    .map((item) => asRecord(item))
+    .map((item) => ({
+      id: asString(item.id),
+      text: asString(item.text),
+      rationale: asString(item.rationale),
+    }))
+    .filter((item) => item.id && item.text);
+
+  return options.length ? options : undefined;
+}
+
+function asAbility(value: unknown): AbilityScore {
+  const record = asRecord(value);
+
+  return abilityKeys.reduce<AbilityScore>(
+    (ability, key) => ({
+      ...ability,
+      [key]: asNumber(record[key]),
+    }),
+    { concept: 0, logic: 0, application: 0, critical: 0, expression: 0 },
+  );
+}
+
+function asRecommendations(value: unknown): LearningRecommendation {
+  const record = asRecord(value);
+
+  return {
+    mastery: asString(record.mastery),
+    gaps: asStringArray(record.gaps),
+    supplements: asStringArray(record.supplements),
+    practiceTasks: asStringArray(record.practiceTasks),
+    nextReviewFocus: asStringArray(record.nextReviewFocus),
+  };
+}
+
+function asLearningInsight(value: unknown): LearningInsight {
+  const record = asRecord(value);
+
+  return {
+    topic: asString(record.topic),
+    weakPoints: asStringArray(record.weakPoints),
+    addedUnderstanding: asStringArray(record.addedUnderstanding),
+    applicationAdvice: asStringArray(record.applicationAdvice),
+  };
 }
 
 export async function persistReport(report: LearningReport): Promise<void> {

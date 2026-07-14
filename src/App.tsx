@@ -36,7 +36,9 @@ import { ABILITY_LABEL, SOURCE_TYPE_LABEL, formatDate, toPercent } from './lib/f
 import { isSupabaseConfigured } from './lib/supabase';
 import {
   initialState,
+  loadRemoteState,
   loadState,
+  mergeAppState,
   persistAnalysis,
   persistQuestionSet,
   persistReport,
@@ -75,8 +77,43 @@ function App() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function hydrateRemoteState() {
+      const remoteState = await loadRemoteState();
+      if (!cancelled && remoteState) {
+        setState((current) => mergeAppState(current, remoteState));
+      }
+    }
+
+    void hydrateRemoteState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     saveState(state);
   }, [state]);
+
+  useEffect(() => {
+    if (!state.sources.some((source) => source.id === selectedSourceId)) {
+      setSelectedSourceId(state.sources[0]?.id ?? '');
+    }
+  }, [selectedSourceId, state.sources]);
+
+  useEffect(() => {
+    if (activeSetId && !state.questionSets.some((questionSet) => questionSet.id === activeSetId)) {
+      setActiveSetId('');
+    }
+  }, [activeSetId, state.questionSets]);
+
+  useEffect(() => {
+    if (activeReportId && !state.reports.some((report) => report.id === activeReportId)) {
+      setActiveReportId('');
+    }
+  }, [activeReportId, state.reports]);
 
   const selectedSource = state.sources.find((source) => source.id === selectedSourceId) ?? state.sources[0];
   const activeQuestionSet = state.questionSets.find((set) => set.id === activeSetId) ?? state.questionSets.at(-1);
