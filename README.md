@@ -65,7 +65,8 @@ VITE_REMOTE_EVAL_CONCURRENCY=1
 VITE_AI_ENDPOINT=/api/ai
 
 DEEPSEEK_API_KEY=
-DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_EVALUATOR_THINKING=disabled
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MAX_TOKENS=
 DEEPSEEK_TIMEOUT_MS=7500
@@ -79,6 +80,7 @@ DEEPSEEK_TIMEOUT_MS=7500
 - `VITE_REMOTE_EVAL_CONCURRENCY` 控制开放题逐题远程批改的并发数，默认 1；跑稳后可以调到 2 或 3。
 - `DEEPSEEK_MAX_TOKENS` 是可选全局覆盖项；留空时函数会按 skill 自动设置输出预算，且开放题批改会被硬限制在 1200 以内。
 - `DEEPSEEK_TIMEOUT_MS` 是函数内主动中止 DeepSeek 调用的时间，默认开放题批改 7500ms，且开放题批改会被硬限制在 8000ms 以内。
+- `DEEPSEEK_EVALUATOR_THINKING=disabled` 表示开放题批改仍使用 Pro 模型，但关闭单题批改的思考模式，避免 EdgeOne 短函数超时；题目生成默认仍启用思考模式。
 - `DEEPSEEK_API_KEY` 只应配置在 Serverless 环境，不要暴露到前端。
 
 ## Supabase 配置
@@ -104,13 +106,14 @@ npm run sync:prompts
 
 ```env
 DEEPSEEK_API_KEY=你的 Key
-DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_EVALUATOR_THINKING=disabled
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MAX_TOKENS=
 DEEPSEEK_TIMEOUT_MS=7500
 ```
 
-建议在 EdgeOne 这类短函数环境使用响应更快的模型，例如 `deepseek-v4-flash`。如果你的 DeepSeek 控制台模型名不同，只需要调整 `DEEPSEEK_MODEL`。
+建议保持 `DEEPSEEK_MODEL=deepseek-v4-pro`，保证题目生成和开放题批改都使用 Pro 模型。如果你的 DeepSeek 控制台模型名不同，只需要调整 `DEEPSEEK_MODEL`。
 
 前端构建环境还需要配置：
 
@@ -124,7 +127,7 @@ VITE_SUPABASE_ANON_KEY=你的 Supabase anon public key
 ```
 
 说明：开放题批改会强制走 DeepSeek；选择题有明确正确答案，判分不需要调用大模型。
-如果开放题批改出现 `504 CLOUD_FUNCTION_INVOCATION_TIMEOUT`，说明 EdgeOne 函数等待模型返回超时。当前实现已经把开放题拆成逐题请求、压缩单题输入，并为 `answer-evaluator` 使用较小的默认输出预算；仍超时时，确认 `DEEPSEEK_MODEL=deepseek-v4-flash`，并保持 `VITE_REMOTE_EVAL_CONCURRENCY=1`。
+如果开放题批改出现 `504 CLOUD_FUNCTION_INVOCATION_TIMEOUT`，说明 EdgeOne 函数等待模型返回超时。当前实现已经把开放题拆成逐题请求、压缩单题输入，并为 `answer-evaluator` 使用较小的默认输出预算；仍超时时，保持 Pro 模型不变，下一步应把 `/api/ai` 迁移到支持更长执行时间的后端或改成异步任务，而不是降级模型。
 
 ## EdgeOne Pages 部署
 

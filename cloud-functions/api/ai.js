@@ -91,6 +91,14 @@ function getTimeoutMs(env, skill) {
   return skill === 'answer-evaluator' ? Math.min(value, 8000) : value;
 }
 
+function getThinkingConfig(env, skill) {
+  const configured =
+    skill === 'answer-evaluator'
+      ? env.DEEPSEEK_EVALUATOR_THINKING ?? env.DEEPSEEK_THINKING ?? 'disabled'
+      : env.DEEPSEEK_THINKING ?? 'enabled';
+  return { type: configured === 'disabled' ? 'disabled' : 'enabled' };
+}
+
 export async function onRequest(context) {
   const { request, env = {} } = context;
 
@@ -114,10 +122,11 @@ export async function onRequest(context) {
   }
 
   const baseUrl = env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com';
-  const model = env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
+  const model = env.DEEPSEEK_MODEL ?? 'deepseek-v4-pro';
   const normalizedInput = normalizeSkillInput(skill, input);
   const maxTokens = getMaxTokens(env, skill, input);
   const timeoutMs = getTimeoutMs(env, skill);
+  const thinking = getThinkingConfig(env, skill);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -132,6 +141,7 @@ export async function onRequest(context) {
       signal: controller.signal,
       body: JSON.stringify({
         model,
+        thinking,
         temperature: 0.1,
         max_tokens: maxTokens,
         response_format: { type: 'json_object' },
