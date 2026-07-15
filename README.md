@@ -105,8 +105,9 @@ EVALUATION_JOB_SLICE_MS=130000
 
 1. 新建 Supabase 项目。
 2. 在 SQL Editor 执行 `supabase/schema.sql`。
-3. 在 `.env.local` 配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`。
-4. 部署异步题目生成和异步批改函数：
+3. 当前个人模式没有账号体系，需要继续在 SQL Editor 执行 `supabase/rls-personal.sql`，允许浏览器使用 anon key 读写数据。该策略只适合个人或受控测试环境；正式多用户上线前必须改为 Supabase Auth + `user_id` 隔离策略。
+4. 在 `.env.local` 配置 `VITE_SUPABASE_URL` 和 `VITE_SUPABASE_ANON_KEY`。
+5. 部署异步题目生成和异步批改函数：
 
 ```bash
 supabase functions deploy generate-question-job
@@ -125,7 +126,7 @@ supabase secrets set DEEPSEEK_EVALUATOR_REQUEST_TIMEOUT_MS=120000
 supabase secrets set EVALUATION_JOB_SLICE_MS=130000
 ```
 
-5. MVP 默认个人使用，未开启复杂多用户权限；正式联网前建议补充 RLS 策略。
+6. 首次从旧版升级时，在桌面端点击“同步到 Supabase”，把浏览器本地已有素材和答题记录回填到云端。
 
 ## DeepSeek 配置
 
