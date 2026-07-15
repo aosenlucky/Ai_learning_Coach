@@ -54,6 +54,7 @@ export function loadState(): AppState {
       ...initialState,
       ...parsed,
       sources: parsed.sources?.length ? parsed.sources : [sampleSource],
+      questionSets: Array.isArray(parsed.questionSets) ? parsed.questionSets.map(normalizeQuestionSet) : [],
     };
   } catch {
     return initialState;
@@ -224,26 +225,27 @@ export async function persistAnalysis(analysis: KnowledgeAnalysis): Promise<void
 
 export async function persistQuestionSet(questionSet: QuestionSet): Promise<void> {
   if (!supabase) return;
+  const normalizedQuestionSet = normalizeQuestionSet(questionSet);
 
   await runSupabase(
     supabase.from('question_sets').upsert({
-      id: questionSet.id,
-      source_id: questionSet.sourceId,
-      analysis_id: questionSet.analysisId,
-      mode: questionSet.mode,
-      question_format: questionSet.questionFormat,
-      question_count: questionSet.questionCount,
-      created_at: questionSet.createdAt,
+      id: normalizedQuestionSet.id,
+      source_id: normalizedQuestionSet.sourceId,
+      analysis_id: normalizedQuestionSet.analysisId,
+      mode: normalizedQuestionSet.mode,
+      question_format: normalizedQuestionSet.questionFormat,
+      question_count: normalizedQuestionSet.questionCount,
+      created_at: normalizedQuestionSet.createdAt,
     }),
     '保存题集到 Supabase',
   );
 
-  if (questionSet.questions.length) {
+  if (normalizedQuestionSet.questions.length) {
     await runSupabase(
       supabase.from('questions').upsert(
-        questionSet.questions.map((question) => ({
+        normalizedQuestionSet.questions.map((question) => ({
           id: question.id,
-          question_set_id: questionSet.id,
+          question_set_id: normalizedQuestionSet.id,
           format: question.format,
           type: question.type,
           bloom_level: question.bloomLevel,
@@ -262,6 +264,32 @@ export async function persistQuestionSet(questionSet: QuestionSet): Promise<void
       '保存题目到 Supabase',
     );
   }
+}
+
+function normalizeQuestionSet(questionSet: QuestionSet): QuestionSet {
+  const questions = Array.isArray(questionSet.questions) ? questionSet.questions : [];
+  const questionFormat =
+    questionSet.questionFormat ??
+    (questions.some((question) => question.format === 'choice' || Boolean(question.options?.length)) ? 'choice' : 'open');
+
+  return {
+    ...questionSet,
+    questionFormat,
+    questionCount: questionSet.questionCount ?? questions.length,
+    questions: questions.map((question) => ({
+      ...question,
+      setId: question.setId || questionSet.id,
+      format: question.format ?? questionFormat,
+      type: question.type ?? 'concept',
+      bloomLevel: question.bloomLevel ?? 'Understand',
+      difficulty: question.difficulty ?? 3,
+      knowledgePoint: question.knowledgePoint ?? question.question ?? '',
+      question: question.question ?? '',
+      expectedAnswer: question.expectedAnswer ?? question.explanation ?? '',
+      evaluationCriteria: question.evaluationCriteria ?? [],
+      reviewScore: question.reviewScore ?? 0,
+    })),
+  };
 }
 
 function mapSourceRow(row: DbRow): LearningSource {
