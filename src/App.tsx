@@ -41,10 +41,9 @@ import {
   loadState,
   mergeAppState,
   persistAnalysis,
-  persistQuestionSet,
-  persistReport,
+  persistCompletedStudyGraph,
+  persistQuestionSetGraph,
   persistSource,
-  persistStudySession,
   saveState,
   syncStateToRemote,
 } from './services/repository';
@@ -78,6 +77,7 @@ function App() {
   const [loading, setLoading] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [remoteHydrating, setRemoteHydrating] = useState(isSupabaseConfigured);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +87,7 @@ function App() {
       if (!cancelled && remoteState) {
         setState((current) => mergeAppState(current, remoteState));
       }
+      if (!cancelled) setRemoteHydrating(false);
     }
 
     void hydrateRemoteState();
@@ -144,7 +145,9 @@ function App() {
     setLoading('正在分析知识结构');
     const result = await runKnowledgeAnalysis(source);
     setState((current) => ({ ...current, analyses: [...current.analyses, result.data] }));
-    void persistAnalysis(result.data).catch((persistError) => reportPersistenceError('知识分析', persistError));
+    void persistSource(source)
+      .then(() => persistAnalysis(result.data))
+      .catch((persistError) => reportPersistenceError('知识分析', persistError));
     return result.data;
   }
 
@@ -158,7 +161,9 @@ function App() {
       const analysis = await ensureAnalysis(selectedSource);
       const result = await runQuestionGeneration(selectedSource, analysis, mode, count, questionFormat);
       setState((current) => ({ ...current, questionSets: [...current.questionSets, result.data] }));
-      void persistQuestionSet(result.data).catch((persistError) => reportPersistenceError('题目', persistError));
+      void persistQuestionSetGraph(selectedSource, analysis, result.data).catch((persistError) =>
+        reportPersistenceError('题目', persistError),
+      );
       setActiveSetId(result.data.id);
       setActiveView('answer');
     } catch (requestError) {
@@ -186,9 +191,14 @@ function App() {
         evaluations: { ...current.evaluations, [questionSet.id]: evaluationResult.data },
         reports: [...current.reports, reportResult.data],
       }));
-      void Promise.all([persistStudySession(questionSet.id, answers, evaluationResult.data), persistReport(reportResult.data)]).catch(
-        (persistError) => reportPersistenceError('答题和批改记录', persistError),
-      );
+      void persistCompletedStudyGraph(
+        source,
+        analysis,
+        questionSet,
+        answers,
+        evaluationResult.data,
+        reportResult.data,
+      ).catch((persistError) => reportPersistenceError('答题和批改记录', persistError));
       setActiveReportId(reportResult.data.id);
       setActiveView('feedback');
     } catch (requestError) {
@@ -215,8 +225,14 @@ function App() {
       if (remoteState) {
         setState((current) => mergeAppState(current, remoteState));
       }
+      const integrityNotice = result.repairedRecords
+        ? ` 自动修复 ${result.repairedRecords} 条旧数据引用。`
+        : '';
+      const skippedNotice = result.skippedRecords
+        ? ` 另有 ${result.skippedRecords} 条孤立记录缺少父数据，已安全跳过并保留在本机。`
+        : '';
       setNotice(
-        `已同步到 Supabase：素材 ${result.sources}，题集 ${result.questionSets}，答题 ${result.answers}，批改 ${result.evaluations}，报告 ${result.reports}。手机端刷新即可查看。`,
+        `已同步到 Supabase：素材 ${result.sources}，题集 ${result.questionSets}，答题 ${result.answers}，批改 ${result.evaluations}，报告 ${result.reports}。${integrityNotice}${skippedNotice}手机端刷新即可查看。`,
       );
     } catch (syncError) {
       setError(syncError instanceof Error ? syncError.message : '同步到 Supabase 失败，请检查环境变量和表权限。');
@@ -331,11 +347,11 @@ function App() {
             <button
               type="button"
               onClick={() => void handleSyncToSupabase()}
-              disabled={!isSupabaseConfigured || Boolean(loading)}
+              disabled={!isSupabaseConfigured || remoteHydrating || Boolean(loading)}
               className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-line px-3 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <CloudUpload size={16} aria-hidden="true" />
-              同步到 Supabase
+              {remoteHydrating ? '正在读取云端' : '同步到 Supabase'}
             </button>
             <button
               type="button"

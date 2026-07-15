@@ -226,10 +226,15 @@ function findAnswer(questionId: string, answers: UserAnswer[]): UserAnswer {
   return answers.find((item) => item.questionId === questionId) ?? { questionId, answer: '' };
 }
 
-function normalizeGeneratedQuestion(question: Question, setId: string, questionFormat: QuestionFormat): Question {
+function normalizeGeneratedQuestion(
+  question: Question,
+  setId: string,
+  questionFormat: QuestionFormat,
+  index: number,
+): Question {
   const normalized: Question = {
     ...question,
-    id: question.id || createId('question'),
+    id: `${setId}__q_${String(index + 1).padStart(3, '0')}`,
     setId,
     format: question.format ?? questionFormat,
     difficulty: question.difficulty ?? 3,
@@ -305,7 +310,7 @@ export async function runQuestionGeneration(
     mode,
     questionFormat,
     questionCount: questions.length,
-    questions: questions.map((question) => normalizeGeneratedQuestion(question, setId, questionFormat)),
+    questions: questions.map((question, index) => normalizeGeneratedQuestion(question, setId, questionFormat, index)),
     createdAt: new Date().toISOString(),
   };
 

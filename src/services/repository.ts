@@ -20,6 +20,13 @@ import type {
 } from '../types';
 import { sampleSource } from '../data/sample';
 import { supabase } from '../lib/supabase';
+import {
+  mergeQuestionSets,
+  normalizeQuestionSet,
+  prepareStateForRemote,
+  reconcileRecordGroups,
+  recoverStateFromJobs,
+} from './stateIntegrity';
 
 const STORAGE_KEY = 'personal-ai-learning-coach-state';
 const abilityKeys = ['concept', 'logic', 'application', 'critical', 'expression'] as const;
@@ -33,6 +40,8 @@ export interface RemoteSyncResult {
   answers: number;
   evaluations: number;
   reports: number;
+  repairedRecords: number;
+  skippedRecords: number;
 }
 
 export const initialState: AppState = {
@@ -102,7 +111,7 @@ export async function loadRemoteState(): Promise<AppState | null> {
     const sources = ((sourcesResponse.data ?? []) as DbRow[]).map(mapSourceRow);
     const analyses = ((analysesResponse.data ?? []) as DbRow[]).map(mapAnalysisRow);
     const questionsBySetId = groupQuestionsBySetId((questionsResponse.data ?? []) as DbRow[]);
-    const questionSets = ((questionSetsResponse.data ?? []) as DbRow[]).map((row) => ({
+    let questionSets = ((questionSetsResponse.data ?? []) as DbRow[]).map((row) => ({
       id: asString(row.id),
       sourceId: asString(row.source_id),
       analysisId: asString(row.analysis_id),
@@ -112,13 +121,46 @@ export async function loadRemoteState(): Promise<AppState | null> {
       questions: questionsBySetId[asString(row.id)] ?? [],
       createdAt: asString(row.created_at),
     }));
+    let recoveredAnswers: Record<string, UserAnswer[]> = {};
+    let recoveredEvaluations: Record<string, Evaluation[]> = {};
+
+    if (questionSets.some((questionSet) => questionSet.questionCount > questionSet.questions.length)) {
+      const [evaluationJobsResponse, generationJobsResponse] = await Promise.all([
+        supabase
+          .from('evaluation_jobs')
+          .select('id, request, result, status, created_at, completed_at')
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('question_generation_jobs')
+          .select('id, request, result, status, created_at, completed_at')
+          .order('created_at', { ascending: true }),
+      ]);
+
+      if (evaluationJobsResponse.error) console.warn('Failed to load evaluation jobs for recovery', evaluationJobsResponse.error);
+      if (generationJobsResponse.error) console.warn('Failed to load generation jobs for recovery', generationJobsResponse.error);
+
+      const recovered = recoverStateFromJobs(
+        questionSets,
+        (evaluationJobsResponse.data ?? []) as DbRow[],
+        (generationJobsResponse.data ?? []) as DbRow[],
+      );
+      questionSets = recovered.questionSets;
+      recoveredAnswers = recovered.answers;
+      recoveredEvaluations = recovered.evaluations;
+    }
+
+    const storedAnswers = groupLatestAnswersBySetId((answersResponse.data ?? []) as DbRow[]);
+    const storedEvaluations = groupLatestEvaluationsBySetId((evaluationsResponse.data ?? []) as DbRow[]);
+
+    const mergedAnswers = mergeAnswerRecords(recoveredAnswers, storedAnswers);
+    const mergedEvaluations = mergeEvaluationRecords(recoveredEvaluations, storedEvaluations);
 
     return {
       sources: sources.length ? sources : [sampleSource],
       analyses,
       questionSets,
-      answers: groupLatestAnswersBySetId((answersResponse.data ?? []) as DbRow[]),
-      evaluations: groupLatestEvaluationsBySetId((evaluationsResponse.data ?? []) as DbRow[]),
+      answers: reconcileRecordGroups(mergedAnswers, questionSets),
+      evaluations: reconcileRecordGroups(mergedEvaluations, questionSets),
       reports: ((reportsResponse.data ?? []) as DbRow[]).map(mapReportRow),
     };
   } catch (error) {
@@ -129,59 +171,77 @@ export async function loadRemoteState(): Promise<AppState | null> {
 
 export function mergeAppState(local: AppState, remote: AppState): AppState {
   const localSources = isOnlySampleSource(local.sources) && hasUserSources(remote.sources) ? [] : local.sources;
+  const questionSets = mergeQuestionSets(local.questionSets, remote.questionSets).sort(sortByCreatedAtAsc);
+  const answers = mergeAnswerRecords(local.answers, remote.answers);
+  const evaluations = mergeEvaluationRecords(local.evaluations, remote.evaluations);
 
   return {
     sources: mergeById(localSources, remote.sources).sort(sortByCreatedAtDesc),
     analyses: mergeById(local.analyses, remote.analyses).sort(sortByCreatedAtAsc),
-    questionSets: mergeById(local.questionSets, remote.questionSets).sort(sortByCreatedAtAsc),
-    answers: mergeAnswerRecords(local.answers, remote.answers),
-    evaluations: mergeEvaluationRecords(local.evaluations, remote.evaluations),
+    questionSets,
+    answers: reconcileRecordGroups(answers, questionSets),
+    evaluations: reconcileRecordGroups(evaluations, questionSets),
     reports: mergeById(local.reports, remote.reports).sort(sortByCreatedAtAsc),
   };
 }
 
 export async function syncStateToRemote(state: AppState): Promise<RemoteSyncResult> {
   requireSupabaseClient();
+  const prepared = prepareStateForRemote(state);
+  const syncState = prepared.state;
 
-  for (const source of state.sources) {
+  for (const source of syncState.sources) {
     await persistSource(source);
   }
 
-  for (const analysis of state.analyses) {
+  for (const analysis of syncState.analyses) {
     await persistAnalysis(analysis);
   }
 
-  for (const questionSet of state.questionSets) {
+  for (const questionSet of syncState.questionSets) {
     await persistQuestionSet(questionSet);
   }
 
-  const questionSetIds = new Set([
-    ...state.questionSets.map((questionSet) => questionSet.id),
-    ...Object.keys(state.answers),
-    ...Object.keys(state.evaluations),
-  ]);
-
   let answerCount = 0;
   let evaluationCount = 0;
-  for (const questionSetId of questionSetIds) {
-    const answers = state.answers[questionSetId] ?? [];
-    const evaluations = state.evaluations[questionSetId] ?? [];
+  for (const questionSet of syncState.questionSets) {
+    if (!questionSet.questions.length) continue;
+    const questionSetId = questionSet.id;
+    const hasLocalSession =
+      Object.prototype.hasOwnProperty.call(syncState.answers, questionSetId) ||
+      Object.prototype.hasOwnProperty.call(syncState.evaluations, questionSetId);
+    if (!hasLocalSession) continue;
+    const answers = syncState.answers[questionSetId] ?? [];
+    const evaluations = syncState.evaluations[questionSetId] ?? [];
     await replaceStudySession(questionSetId, answers, evaluations);
     answerCount += answers.length;
     evaluationCount += evaluations.length;
   }
 
-  for (const report of state.reports) {
+  for (const report of syncState.reports) {
     await persistReport(report);
   }
 
+  const repairedRecords =
+    prepared.stats.repairedQuestionIds +
+    prepared.stats.repairedReferences +
+    prepared.stats.clearedAnalysisReferences;
+  const skippedRecords =
+    prepared.stats.skippedAnalyses +
+    prepared.stats.skippedQuestionSets +
+    prepared.stats.skippedAnswers +
+    prepared.stats.skippedEvaluations +
+    prepared.stats.skippedReports;
+
   return {
-    sources: state.sources.length,
-    analyses: state.analyses.length,
-    questionSets: state.questionSets.length,
+    sources: syncState.sources.length,
+    analyses: syncState.analyses.length,
+    questionSets: syncState.questionSets.length,
     answers: answerCount,
     evaluations: evaluationCount,
-    reports: state.reports.length,
+    reports: syncState.reports.length,
+    repairedRecords,
+    skippedRecords,
   };
 }
 
@@ -231,7 +291,7 @@ export async function persistQuestionSet(questionSet: QuestionSet): Promise<void
     supabase.from('question_sets').upsert({
       id: normalizedQuestionSet.id,
       source_id: normalizedQuestionSet.sourceId,
-      analysis_id: normalizedQuestionSet.analysisId,
+      analysis_id: normalizedQuestionSet.analysisId || null,
       mode: normalizedQuestionSet.mode,
       question_format: normalizedQuestionSet.questionFormat,
       question_count: normalizedQuestionSet.questionCount,
@@ -264,32 +324,6 @@ export async function persistQuestionSet(questionSet: QuestionSet): Promise<void
       '保存题目到 Supabase',
     );
   }
-}
-
-function normalizeQuestionSet(questionSet: QuestionSet): QuestionSet {
-  const questions = Array.isArray(questionSet.questions) ? questionSet.questions : [];
-  const questionFormat =
-    questionSet.questionFormat ??
-    (questions.some((question) => question.format === 'choice' || Boolean(question.options?.length)) ? 'choice' : 'open');
-
-  return {
-    ...questionSet,
-    questionFormat,
-    questionCount: questionSet.questionCount ?? questions.length,
-    questions: questions.map((question) => ({
-      ...question,
-      setId: question.setId || questionSet.id,
-      format: question.format ?? questionFormat,
-      type: question.type ?? 'concept',
-      bloomLevel: question.bloomLevel ?? 'Understand',
-      difficulty: question.difficulty ?? 3,
-      knowledgePoint: question.knowledgePoint ?? question.question ?? '',
-      question: question.question ?? '',
-      expectedAnswer: question.expectedAnswer ?? question.explanation ?? '',
-      evaluationCriteria: question.evaluationCriteria ?? [],
-      reviewScore: question.reviewScore ?? 0,
-    })),
-  };
 }
 
 function mapSourceRow(row: DbRow): LearningSource {
@@ -583,14 +617,46 @@ export async function persistReport(report: LearningReport): Promise<void> {
   );
 }
 
-export async function persistStudySession(
-  questionSetId: string,
+export async function persistQuestionSetGraph(
+  source: LearningSource,
+  analysis: KnowledgeAnalysis,
+  questionSet: QuestionSet,
+): Promise<void> {
+  await persistSource(source);
+  await persistAnalysis(analysis);
+  await persistQuestionSet(questionSet);
+}
+
+export async function persistCompletedStudyGraph(
+  source: LearningSource,
+  analysis: KnowledgeAnalysis,
+  questionSet: QuestionSet,
   answers: UserAnswer[],
   evaluations: Evaluation[],
+  report: LearningReport,
 ): Promise<void> {
   if (!supabase) return;
 
-  await insertStudySession(questionSetId, answers, evaluations);
+  const prepared = prepareStateForRemote({
+    sources: [source],
+    analyses: [analysis],
+    questionSets: [questionSet],
+    answers: { [questionSet.id]: answers },
+    evaluations: { [questionSet.id]: evaluations },
+    reports: [report],
+  }).state;
+  const preparedQuestionSet = prepared.questionSets[0];
+  if (!preparedQuestionSet?.questions.length) {
+    throw new Error('保存学习记录失败：题集没有可关联的题目，请先重新生成或恢复题目。');
+  }
+
+  await persistQuestionSetGraph(source, analysis, preparedQuestionSet);
+  await replaceStudySession(
+    preparedQuestionSet.id,
+    prepared.answers[preparedQuestionSet.id] ?? [],
+    prepared.evaluations[preparedQuestionSet.id] ?? [],
+  );
+  await persistReport(report);
 }
 
 function requireSupabaseClient(): NonNullable<typeof supabase> {
